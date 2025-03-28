@@ -1,0 +1,623 @@
+package com.dkms.d5n.t5h;
+
+import com.dkms.d5n.serial.T5HSystem;
+import com.dkms.d5n.serial.Serial232;
+import com.dkms.d5n.serial.Serial422;
+import com.dkms.d5n.t5h.handler.ReportProgressHandler;
+import com.dkms.d5n.t5h.handler.T5HAutoHandler;
+import com.dkms.d5n.t5h.handler.T5HAutoKvHandler;
+import com.dkms.d5n.t5h.handler.T5HCaliHandler;
+import com.dkms.d5n.t5h.handler.T5HGenInfoHandler;
+import com.dkms.d5n.t5h.handler.T5HHandler;
+import com.dkms.d5n.t5h.handler.T5HOscilloscopeHandler;
+import com.dkms.d5n.t5h.handler.T5HStatusBarHandler;
+import com.dkms.d5n.util.T5HMessage;
+
+import android.content.Context;
+import android.os.Message;
+
+import androidx.annotation.RestrictTo;
+
+// UI 에서 Elin 으로 호출하거나 Elin 에서 UI 쪽으로 이벤트 전달할 때 사용하는 클래스.
+public class T5H {
+	private static final String TAG = "T5H";
+
+	private volatile static T5H instance;
+
+	public static T5HHandler handler;
+	public static T5HCaliHandler calihandler;
+	public static T5HAutoHandler autohandler;
+	public static T5HAutoKvHandler autokvhandler;
+	public static T5HGenInfoHandler geninfohandler;
+	public static T5HOscilloscopeHandler ScopeHandler;
+	public static T5HStatusBarHandler statusBarHandler;
+	public static com.dkms.d5n.t5h.handler.ReportProgressHandler ReportProgressHandler;
+
+	private static T5HSystem t5hSystem = null;
+	//private static Serial422 serial422	= null;
+	private static Serial232 serial232	= null;
+	private static Context context;
+
+	public static T5H getInstance() {
+		if (instance == null) {
+			synchronized (T5H.class) {
+				if (instance == null) {
+					instance = new T5H();
+				}
+			}
+		}
+		return instance;
+	}
+
+	private T5H()
+	{
+		handler			= new T5HHandler();
+		calihandler		= new T5HCaliHandler();
+		autohandler		= new T5HAutoHandler();
+		autokvhandler	= new T5HAutoKvHandler();
+		geninfohandler	= new T5HGenInfoHandler();
+		ScopeHandler	= new T5HOscilloscopeHandler();
+		statusBarHandler = new T5HStatusBarHandler();
+		ReportProgressHandler = new ReportProgressHandler();
+	}
+
+	public T5HHandler GetT5HHandler()
+	{
+		return handler;
+	}
+	public T5HCaliHandler GetT5HCaliHandler()
+	{
+		return calihandler;
+	}
+	public T5HAutoHandler GetT5HAutoHandler()
+	{
+		return autohandler;
+	}
+	public T5HAutoKvHandler GetT5HAutoKvHandler()
+	{
+		return autokvhandler;
+	}
+	public T5HGenInfoHandler GetT5HGenInfoHandler()
+	{
+		return geninfohandler;
+	}
+	public T5HOscilloscopeHandler GetT5HScopeHandler(){
+		return ScopeHandler;
+	}
+	public T5HStatusBarHandler GetT5HStatusBarHandler()
+	{
+		return statusBarHandler;
+	}
+	public ReportProgressHandler GetReportProgressHandler()
+	{
+		return ReportProgressHandler;
+	}
+
+  /*
+	public Serial422 init(Context c) {
+		context = c.getApplicationContext();
+
+		t5hSystem = new T5HSystem();
+		serial422 	= new Serial422();
+
+		SerialInit();
+		return serial422;
+	}
+   */
+
+	public Serial232 init232(Context c) {
+		context = c.getApplicationContext();
+
+		t5hSystem = new T5HSystem(context);
+		serial232 	= new Serial232();
+
+		Serial232Init();
+		return serial232;
+	}
+
+	public T5HSystem getSystem()
+	{
+		return t5hSystem;
+	}
+
+	public void InitSysStart()
+	{
+		t5hSystem.InitTimerStart();
+	}
+
+	// Thread 중복 *** 2023.10.04
+	private void SerialInit() {
+//		serial422.SerialPortStart();
+	}
+
+	private void Serial232Init() {
+		serial232.SerialPortStart();
+	}
+
+	public void addEventListener(T5HHandler.T5HEventListener l) {
+		handler.addEventListener(l);
+	}
+
+	public void addEventListener(T5HCaliHandler.T5HCaliEventListener l) {
+		calihandler.addEventListener(l);
+	}
+
+	public void addEventListener(T5HAutoHandler.T5HAutoEventListener l) {
+		autohandler.addEventListener(l);
+	}
+
+	public void addEventListener(T5HAutoKvHandler.T5HAutoKvEventListener l) {
+		autokvhandler.addEventListener(l);
+	}
+
+	public void addEventListener(T5HGenInfoHandler.T5HGenInfoEventListener l) {
+		geninfohandler.addEventListener(l);
+	}
+
+	//Scope
+	public void addEventListener(T5HOscilloscopeHandler.T5HScopeEventListener l) {
+		ScopeHandler.addEventListener(l);
+	}
+	public void addEventListener(T5HStatusBarHandler.T5HStatusBarEventListener l)
+	{
+		statusBarHandler.addEventListener(l);
+	}
+	public void addEventListener(ReportProgressHandler.ReportProgressListener l) {
+		ReportProgressHandler.addEventListener(l);
+	}
+
+	public void removeEventListener(T5HHandler.T5HEventListener l) {
+		handler.removeEventListener(l);
+	}
+
+	// 1. Main 화면
+
+	public void sendHiddenMessage(T5HMessage.MessageCollectionsError hiddenMsg)
+	{
+		String arg = Integer.toString(hiddenMsg.get());
+	}
+
+	public void sendMessage(T5HMessage.MessageCollectionsError msg)
+	{
+		int code = msg.get();
+		sendMessage(code,"");
+	}
+
+	public void sendMessage(T5HMessage.MessageCollectionsError msg, String arg)
+	{
+		int code = msg.get();
+		sendMessage(code,arg);
+	}
+
+	public void sendMessage(int index, String msg)
+	{
+		//LogUtil.i("Elin::sendMessage " + index + " " + msg);
+		GetT5HHandler().sendMessage(handler, index, msg);
+		GetT5HCaliHandler().sendMessage(calihandler, index, msg);
+		GetT5HAutoHandler().sendMessage(autohandler, index, msg);
+
+	}
+	public void sendMessage(int index, int index1, String msg)
+	{
+		//LogUtil.i("Elin::sendMessage " + index + " " + msg);
+		GetT5HHandler().sendMessage(handler, index, index1, msg);
+	}
+
+	public void SendStatusMsgMain(int what, int arg1, int arg2){
+    	Message msg = Message.obtain(handler, what, arg1, arg2);
+    	handler.sendMessage(msg);
+		Message msg1 = Message.obtain(calihandler, what, arg1, arg2);
+		calihandler.sendMessage(msg1);
+		Message msg2 = Message.obtain(autohandler, what, arg1, arg2);
+		autohandler.sendMessage(msg2);
+    }
+
+    public void SendStatusMsgMain(int what, int arg1, int arg2, String strMsg ){
+    	Message msg = Message.obtain(handler, what, arg1, arg2, (Object)strMsg);
+    	handler.sendMessage(msg);
+    }
+
+    public void sendSoundPlay(int index)
+    {
+    	handler.sendSoundPlay(handler, index);
+    }
+
+
+	// Main Feedback Value Display Change
+	public void sendMainFeedBackDisplayChanged(String value)
+	{
+		GetT5HHandler().sendMainFeedBackDisplayChanged(handler, value);
+	}
+
+	// DAP Feedback Value Display Change
+	public void sendDAPFeedBackDisplayChanged(String value)
+	{
+		GetT5HHandler().sendDAPFeedBackDisplayChanged(handler, value);
+	}
+
+	// Device Connect Check(0 : DisConnect, 1 : Connect)
+	public void sendDeviceConnectChecked(int index)
+	{
+		GetT5HHandler().sendDeviceConnectChecked(handler, index);
+	}
+
+	// Total Count Value Change
+	public void sendTotalCountValueChanged(String value)
+	{
+		GetT5HHandler().sendTotalCountValueChanged(handler, value);
+	}
+
+	// Total Heat Unit Value Change
+	public void sendTotalHeatUnitValueChanged(String value)
+	{
+		GetT5HHandler().sendTotalHeatUnitValueChanged(handler, value);
+	}
+
+	public void sendWarningValue(int value)
+	{
+		switch(T5HSystem._t5hStatus)
+		{
+			case Normal:
+				GetT5HHandler().sendWarningValue(handler, value);
+				break;
+		}
+	}
+
+	// Heat Unit Value Change
+	public void sendHeatUnitValueChanged(String value)
+	{
+		GetT5HHandler().sendHeatUnitValueChanged(handler, value);
+	}
+
+    public void sendKvValueChanged(String value)
+	{
+		GetT5HHandler().sendKvValueChanged(handler, value);
+    }
+	public void sendMaValueChanged(String value)
+	{
+		GetT5HHandler().sendMaValueChanged(handler, value);
+	}
+	public void sendMsValueChanged(String value)
+	{
+		GetT5HHandler().sendMsValueChanged(handler, value);
+	}
+	public void sendMasValueChanged(String value)
+	{
+		GetT5HHandler().sendMasValueChanged(handler, value);
+	}
+	public void sendDensityValueChanged(String value)
+	{
+		GetT5HHandler().sendDensityValueChanged(handler, value);
+	}
+
+	// Only kv Calibration
+	public void sendKvCalikVDACValueDisplay(String value) {
+		GetT5HCaliHandler().sendKvCalikVDACValueDisplay(calihandler, value);
+	}
+
+	// Only kv Calibration
+	public void sendKvCalimADACValueDisplay(String value) {
+		GetT5HCaliHandler().sendKvCalimADACValueDisplay(calihandler, value);
+	}
+
+	// Only kv Calibration
+	public void sendKvCaliFeedBackDisplay(String value) {
+		GetT5HCaliHandler().sendKvCaliFeedBackDisplay(calihandler, value);
+	}
+
+	// Only kv Calibration
+	public void sendKvCalimAFeedBackDisplay(String value) {
+		GetT5HCaliHandler().sendKvCalimAFeedBackDisplay(calihandler, value);
+	}
+
+	// Only mA Manual Calibration
+	public void sendMaCalimADACValueDisplay(String value) {
+		GetT5HCaliHandler().sendMaCaliDACValueDisplay(calihandler, value);
+	}
+
+	// Only mA Calibration
+	public void sendMaCaliCheckLargeValueDisplay(String value) {
+		GetT5HCaliHandler().sendMaCaliCheckLargeValueDisplay(calihandler, value);
+	}
+	// Only mA Calibration
+	public void sendMaCaliCheckSmallValueDisplay(String value) {
+		GetT5HCaliHandler().sendMaCaliCheckSmallValueDisplay(calihandler, value);
+	}
+	// Only mA Auto Calibration
+
+	public void sendMaAutoCalikVValueDisplay(String value) {
+		GetT5HCaliHandler().sendMaAutoCalikVValueDisplay(calihandler, value);
+	}
+
+	// Only mA Auto Calibration
+	public void sendMaAutoCalimAValueDisplay(String value) {
+		GetT5HCaliHandler().sendMaAutoCalimAValueDisplay(calihandler, value);
+	}
+
+	// Only mA Auto Calibration
+	public void sendMaAutoCalimADACValueDisplay(String value) {
+		GetT5HCaliHandler().sendMaAutoCaliDACValueDisplay(calihandler, value);
+	}
+
+	// Only mA Auto Calibration
+	public void sendMaAutoCalimAFBValueDisplay(String value) {
+		GetT5HCaliHandler().sendMaAutoCaliFBValueDisplay(calihandler, value);
+	}
+
+	// Only mA Auto Calibration
+	public void sendMaAutoCaliDisplayCorrectedPoint(String value) {
+		GetT5HCaliHandler().sendMaAutoCaliDisplayCorrectedPoint(calihandler, value);
+	}
+
+	// Only mA Calibration
+	public void sendMaCaliTotalHeatUnitValueChanged(String value) {
+		GetT5HCaliHandler().sendMaCaliTotalHeatUnitValueChanged(calihandler, value);
+	}
+
+	// Only mA Calibration
+	public void sendMaCaliTotalCountValueChanged(String value) {
+		GetT5HCaliHandler().sendMaCaliTotalCountValueChanged(calihandler, value);
+	}
+
+	// Only mA Calibration
+	public void sendMaCaliHeatUnitValueChanged(String value) {
+		GetT5HCaliHandler().sendMaCaliHeatUnitValueChanged(calihandler, value);
+	}
+
+	// Only Calibration Device Connect Check(0 : DisConnect, 1 : Connect)
+	public void sendMaCaliDeviceConnectedChanged(int value)
+	{
+		GetT5HCaliHandler().sendMaCaliDeviceConnectedChanged(calihandler,value);
+	}
+
+	// Only AEC Manual Calibration
+	public void sendAECCaliBucky1DACValueDisplay(String value) {
+		GetT5HCaliHandler().sendAECCaliBucky1DACValueDisplay(calihandler, value);
+	}
+
+	// Only AEC Manual Calibration
+	public void sendAECCaliBucky2DACValueDisplay(String value) {
+		GetT5HCaliHandler().sendAECCaliBucky2DACValueDisplay(calihandler, value);
+	}
+
+	// Only AEC Manual Calibration
+	public void senddAECCaliDensityValueChanged(String value)
+	{
+		GetT5HCaliHandler().sendAECCaliDensityValueChanged(calihandler, value);
+	}
+
+	// Only Use Auto Expose Mode
+	// Point 1
+	public void sendKvValueChangedAuto(String value)
+	{
+		GetT5HAutoHandler().sendKvValueChangedAuto(autohandler, value);
+	}
+	public void sendMaValueChangedAuto(String value)
+	{
+		GetT5HAutoHandler().sendMaValueChangedAuto(autohandler, value);
+	}
+	public void sendMsValueChangedAuto(String value)
+	{
+		GetT5HAutoHandler().sendMsValueChangedAuto(autohandler, value);
+	}
+	public void sendFocusDisplayChangedAuto(String value)
+	{
+		GetT5HAutoHandler().sendFocusDisplayChangedAuto(autohandler, value);
+	}
+
+	// Progress Count
+	public void sendProgressCountChangedAuto(String value)
+	{
+		GetT5HAutoHandler().sendProgressCountChangedAuto(autohandler, value);
+	}
+
+	// FeedBack Value Change
+	public void sendFeedBackDisplayChangedAuto(String value)
+	{
+		GetT5HAutoHandler().SendFeedBackDisplayChangedAuto(autohandler, value);
+	}
+
+	// Heat Unit Value Change
+	public void sendHeatUnitValueChangedAuto(String value)
+	{
+		GetT5HAutoHandler().sendHeatUnitValueChangedAuto(autohandler, value);
+	}
+	// Total Count Value Change Auto
+	public void sendTotalCountValueChangedAuto(String value)
+	{
+		GetT5HAutoHandler().sendTotalCountValueChangedAuto(autohandler, value);
+	}
+	// Heat Unit Value Change Auto
+	public void sendTotalHeatUnitValueChangedAuto(String value)
+	{
+		GetT5HAutoHandler().sendTotalHeatUnitValueChangedAuto(autohandler, value);
+	}
+
+	public void sendDeviceConnectedValueChangedAuto(int value)
+	{
+		GetT5HAutoHandler().sendDeviceConnectedValueChangedAuto(autohandler,value);
+	}
+
+	// 내전압테스트용 (Auto Kv)
+	public void sendKvValueChangedAutoKv(String value)
+	{
+		GetT5HAutoKvHandler().SendKvValueChangedAutoKv(autokvhandler, value);
+	}
+
+	// 내전압테스트용 (Auto Kv)
+	public void sendProgressChangedAutoKv(String value)
+	{
+		GetT5HAutoKvHandler().SendProgressChangedAutoKv(autokvhandler, value);
+	}
+
+	public void sendDeviceConnectedValueChangedAutoKv(int value)
+	{
+		GetT5HAutoKvHandler().SendDeviceConnectedValueChangedAutoKv(autokvhandler, value);
+	}
+
+	public void sendHeatUnitValueChangedAutoKv(String value)
+	{
+		GetT5HAutoKvHandler().SendHeatUnitValueChangedAutoKv(autokvhandler, value);
+	}
+
+	// Heat Unit Value Change Generator Info
+	public void sendHeatUnitValueChangedGenInfo(String value)
+	{
+		GetT5HGenInfoHandler().sendHeatUnitValueChangedGenInfo(geninfohandler, value);
+	}
+	// Total Count Value Change Generator Info
+	public void sendTotalCountValueChangedGenInfo(String value)
+	{
+		GetT5HGenInfoHandler().sendTotalCountValueChangedGenInfo(geninfohandler, value);
+	}
+	// Heat Unit Value Change Generator Info
+	public void sendTotalHeatUnitValueChangedGenInfo(String value)
+	{
+		GetT5HGenInfoHandler().sendTotalHeatUnitValueChangedGenInfo(geninfohandler, value);
+	}
+
+	// Check Power Diagnosis
+	public void sendDiagnosisValueChangedGenInfo(String value)			// Check Diagnosis Value
+	{
+		GetT5HGenInfoHandler().sendDiagnosisValueChangedGenInfo(geninfohandler, value);
+	}
+	// Check Power Diagnosis
+	public void sendDiagnosisValue1ChangedGenInfo(String value)			// Check Diagnosis Value
+	{
+		GetT5HGenInfoHandler().sendDiagnosisValue1ChangedGenInfo(geninfohandler, value);
+	}
+	// Check Power Diagnosis
+	public void sendDiagnosisValue2ChangedGenInfo(String value)			// Check Diagnosis Value
+	{
+		GetT5HGenInfoHandler().sendDiagnosisValue2ChangedGenInfo(geninfohandler, value);
+	}
+	// Check Power Diagnosis
+	public void sendDiagnosisValue3ChangedGenInfo(String value)			// Check Diagnosis Value
+	{
+		GetT5HGenInfoHandler().sendDiagnosisValue3ChangedGenInfo(geninfohandler, value);
+	}
+	// Check Power Diagnosis
+	public void sendDiagnosisValue4ChangedGenInfo(String value)			// Check Diagnosis Value
+	{
+		GetT5HGenInfoHandler().sendDiagnosisValue4ChangedGenInfo(geninfohandler, value);
+	}
+	// Check Power Diagnosis
+	public void sendDiagnosisValue5ChangedGenInfo(String value)			// Check Diagnosis Value
+	{
+		GetT5HGenInfoHandler().sendDiagnosisValue5ChangedGenInfo(geninfohandler, value);
+	}
+
+	// Check Power Diagnosis
+	public void sendDiagnosisValue6ChangedGenInfo(String value)			// Check Diagnosis Value
+	{
+		GetT5HGenInfoHandler().sendDiagnosisValue6ChangedGenInfo(geninfohandler, value);
+	}
+
+	// Check Power Diagnosis
+	public void sendDiagnosisValue7ChangedGenInfo(String value)			// Check Diagnosis Value
+	{
+		GetT5HGenInfoHandler().sendDiagnosisValue7ChangedGenInfo(geninfohandler, value);
+	}
+
+	// Check Power Diagnosis
+	public void sendDiagnosisValue8ChangedGenInfo(String value)			// Check Diagnosis Value
+	{
+		GetT5HGenInfoHandler().sendDiagnosisValue8ChangedGenInfo(geninfohandler, value);
+	}
+
+	public void sendDiagnosisValue9ChangedGenInfo(String value)
+	{
+		GetT5HGenInfoHandler().sendDiagnosisValue9ChangedGenInfo(geninfohandler, value);
+	}
+
+	// Check F/W Version
+	public void sendFwVersionValueChangedGenInfo(int act,int num,String value)			// Check FW Vesion Value
+	{
+		GetT5HGenInfoHandler().sendFwVersionValueChangedGenInfo(geninfohandler,act,num,value);
+	}
+
+	public void sendDeviceConnectedValueChangedGenInfo(int value)
+	{
+		GetT5HGenInfoHandler().sendDeviceConnectedValueChangedGenInfo(geninfohandler, value);
+	}
+
+		// Only Use Scope Mode
+	public void sendKvValueChangedScope(String value)
+	{
+		GetT5HScopeHandler().sendKvValueChangedScope(ScopeHandler, value);
+	}
+
+	public void sendMaValueChangedScope(String value)
+	{
+		GetT5HScopeHandler().sendMaValueChangedScope(ScopeHandler, value);
+	}
+
+	public void sendMsValueChangedScope(String value)
+	{
+		GetT5HScopeHandler().sendMsValueChangedScope(ScopeHandler, value);
+	}
+
+	public void sendFocusDisplayChangedScope(String value)
+	{
+		GetT5HScopeHandler().sendFocusDisplayChangedScope(ScopeHandler, value);
+	}
+
+	public void sendFilamentPreHeatDisplayChagedScope(String value)
+	{
+		GetT5HScopeHandler().sendFilamentPreHeatDisplayChangedScope(ScopeHandler, value);
+	}
+
+	public void sendFilamentBoostDisplayChangedScope(String value)
+	{
+		GetT5HScopeHandler().sendFilamentBoostDisplayChangedScope(ScopeHandler, value);
+	}
+
+	public void sendFilamentReadyDisplayChangedScope(String value)
+	{
+		GetT5HScopeHandler().sendFilamentReadyDisplayChangedScope(ScopeHandler, value);
+	}
+
+	public void sendRotorStartingDisplayChangedScope(String value)
+	{
+		GetT5HScopeHandler().sendRotorStartingDisplayChangedScope(ScopeHandler, value);
+	}
+
+	public void sendRotorRunningDisplayChangedScope(String value)
+	{
+		GetT5HScopeHandler().sendRotorRunningDisplayChangedScope(ScopeHandler, value);
+	}
+
+	public void sendDeviceConnectedChangedScope(int value)
+	{
+		GetT5HScopeHandler().sendDeviceConnectedChangedScope(ScopeHandler,value);
+	}
+
+	public void sendHeatUnitValueChangedScope(String value)
+	{
+		GetT5HScopeHandler().sendHeatUnitValueChangedScope(ScopeHandler,value);
+	}
+
+	public void sendReportProgressData(String value)
+	{
+		GetReportProgressHandler().sendReportProgressData(ReportProgressHandler,value);
+	}
+
+	public void receiveSystemReportCompleteData(String value) {
+		GetReportProgressHandler().receiveSystemReportCompleteData(ReportProgressHandler, value);
+	}
+
+	public void sendDeviceConnectedChangedStatusBar(int value)
+	{
+		GetT5HStatusBarHandler().sendDeviceConnectedChangedStatusBar(statusBarHandler,value);
+	}
+
+	public void sendHeatUnitValueChangedStatusBar(String value)
+	{
+		GetT5HStatusBarHandler().sendHeatUnitValueChangedStatusBar(statusBarHandler,value);
+	}
+
+	public void sendInternetValueChangedStatusBar(boolean value)
+	{
+		GetT5HStatusBarHandler().sendInternetValueChangedStatusBar(statusBarHandler,value);
+	}
+}

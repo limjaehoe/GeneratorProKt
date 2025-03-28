@@ -1,0 +1,1544 @@
+package com.dkms.d5n.serial;
+
+import static com.dkms.d5n.MainActivity.genMgr;
+import static com.dkms.d5n.serial.T5HSystem._t5hStatus;
+import static com.dkms.d5n.t5h.T5H.ScopeHandler;
+import static com.dkms.d5n.t5h.T5H.autohandler;
+import static com.dkms.d5n.t5h.T5H.autokvhandler;
+import static com.dkms.d5n.t5h.T5H.calihandler;
+import static com.dkms.d5n.t5h.T5H.geninfohandler;
+import static com.dkms.d5n.t5h.T5H.handler;
+import static com.dkms.d5n.t5h.T5H.statusBarHandler;
+
+import android.annotation.SuppressLint;
+import android.os.Message;
+import android.os.SystemClock;
+import android.util.Log;
+
+import androidx.annotation.Nullable;
+
+import com.dkms.d5n.data.ActionCommandT5H;
+import com.dkms.d5n.data.ControlCommandT5H;
+import com.dkms.d5n.t5h.handler.T5HAutoHandler;
+import com.dkms.d5n.t5h.handler.T5HAutoKvHandler;
+import com.dkms.d5n.t5h.handler.T5HCaliHandler;
+import com.dkms.d5n.t5h.handler.T5HGenInfoHandler;
+import com.dkms.d5n.t5h.handler.T5HHandler;
+import com.dkms.d5n.t5h.handler.T5HOscilloscopeHandler;
+import com.dkms.d5n.t5h.handler.T5HStatusBarHandler;
+import com.dkms.d5n.t5h.manager.ErrWarnInfoDataManager;
+import com.dkms.d5n.t5h.manager.operationManager;
+import com.dkms.d5n.util.ErrorLogUtil;
+import com.dkms.d5n.util.LogUtil;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import android_serialport_api.SerialPort;
+import android_serialport_api.SerialPortFinder;
+
+public class Serial422 {
+
+    static final String SERIAL_PORT_NAME = "ttyS4"; // UART 485 : S1. UART 2 =  ttyS4  UART 3 = S3 ttyUSB  ttyS
+    static final int SERIAL_BAUDRATE = 115200;
+
+    SerialPort mSerialPort;
+    InputStream mInputStream;
+    OutputStream mOutputStream;
+    ReadThread mReadThread;
+
+    T5HHandler mT5HHandler = handler;
+    T5HCaliHandler mT5HCaliHandler = calihandler;
+    T5HAutoHandler mT5HAutoHandler = autohandler;
+    T5HAutoKvHandler mT5HAutoKvHandler = autokvhandler;
+    T5HGenInfoHandler mT5HGenInfoHandler = geninfohandler;
+    T5HOscilloscopeHandler mT5HScopeHandler = ScopeHandler;
+    T5HStatusBarHandler mT5HStatusBarHandler = statusBarHandler;
+
+
+    int count = 0;
+
+		public interface receiveListener {
+			boolean callback(int ctrlCmd, int actCmd, byte[] actDat, boolean timeout, int ack, int sid);
+		}
+
+    public static class txQueue { //@001 ▼
+        int len;
+        byte[] id;
+        byte[] szData;
+        byte actCmd;
+        byte ctrlCmd;
+        byte[] waitActCmds;
+        byte retryCnt;
+        byte[] markActCmds;
+        boolean expired;
+        byte sendCnt;
+	      receiveListener listener;
+				boolean listenerCalled;
+
+        txQueue(int len, byte[] id, byte[] szData, receiveListener listener, boolean noRetry) {
+	          listenerCalled = false;
+            expired = false;
+            sendCnt = 0;
+						retryCnt = 0;
+	          this.listener = listener;
+            this.len = len;
+            this.id = new byte[id.length];
+	          this.szData = (szData != null) ? new byte[szData.length] : null;
+	          actCmd = id[3];
+            ctrlCmd = id[2];
+            System.arraycopy(id, 0, this.id, 0, this.id.length);
+	          //operationManager.markStatus(operationManager.bytesToString(this.id));
+
+	          if(szData != null) System.arraycopy(szData, 0, this.szData, 0, this.szData.length);
+
+            switch ((int) actCmd & 0xFF) {
+                case ActionCommandT5H.INITIAL_REQ:
+                case ActionCommandT5H.FEEDBACK_REQUEST:
+                case ActionCommandT5H.POWER_DIAGNOSIS:
+                case ActionCommandT5H.T_OPCON_STATUS:
+                    waitActCmds = null;
+                    break;
+
+                default:
+                    waitActCmds = new byte[]{actCmd};
+                    break;
+            }
+
+						if(noRetry && (waitActCmds != null)){
+							waitActCmds = null;
+						}
+
+            if (waitActCmds != null) {
+                markActCmds = new byte[waitActCmds.length];
+                Arrays.fill(markActCmds, (byte) 0);
+            } else {
+                markActCmds = null;
+            }
+        }
+    } //@001 ▲
+
+    rxParsing[] arrayRxParsing; //@002
+    private static class rxParsing { //@002 ▼
+        byte[] packet = new byte[384]; //bootloader datalen up to 256bytes
+        int pktPos = 0;
+        int pktLen = 0;
+        long psTimeMark = 0;
+        long rxIdleTime = 0;
+        byte psStep = 0;
+        final byte protocol1st = 0x23;
+        final byte protocol2nd = 0x50;
+        final byte protocolEnd = 0x21;
+        int remainLen = 0;
+        final byte prevCutLen = 6; //first(1)+second(1)+target(1)+source(1)+length(2)
+        String logTag;
+        boolean err = false;
+        boolean pktOk = false;
+        Serial422 parent;
+        int index;
+
+        @SuppressLint("DefaultLocale")
+        rxParsing(int index, Serial422 parent, String logTag) {
+            this.index = index;
+            this.logTag = logTag + String.format("(idx:%d)", index);
+            this.parent = parent;
+        }
+
+        void gatherStart() {
+            err = false;
+            pktOk = false;
+        }
+
+        @SuppressLint("DefaultLocale")
+        void gathering(final byte rdByte) {
+            switch (psStep) {
+                case 0: { //wait first protocol
+                    if (pktPos > 0) pktPos = 0;
+
+                    if (protocol1st != rdByte) {
+                        if (index == 0) {
+                            LogUtil.e(logTag + String.format("WRONG 1stProtocol %Xh != %Xh"
+                                    , protocol1st, rdByte));
+                        }
+
+                        err = true;
+                        break;
+                    }
+
+                    psStep++;
+                    rxIdleTime = 0;
+
+                    if (index == 0) {
+                        psTimeMark = parent.msTimeGet() + 100; //per ms, timeout set
+                    }
+
+                    break;
+                }
+
+                case 1: { //wait second protocol
+                    if (protocol2nd != rdByte) {
+                        if (index == 0) {
+                            LogUtil.e(logTag + String.format("WRONG 2ndProtocol %Xh != %Xh"
+                                    , protocol2nd, rdByte));
+                        }
+
+                        err = true;
+                        break;
+                    }
+
+                    psStep++;
+                    break;
+                }
+
+                case 2: { //get length
+                    if (pktPos < prevCutLen) break;
+
+                    pktLen = (((int) packet[4] & 0xFF) << 8) | ((int) packet[5] & 0xFF);
+
+                    if (pktLen >= prevCutLen) remainLen = pktLen - prevCutLen;
+
+                    //LogUtil.i(LogTag + String.format("%d %d", pktLen, remainLen)); // chk
+                    psStep++;
+                    break;
+                }
+
+                case 3: { //get data
+                    if (remainLen > 0) remainLen--;
+
+                    if (remainLen > 0) break;
+
+                    if (protocolEnd != rdByte) { // check endProtocol
+                        if (index == 0) {
+                            LogUtil.e(logTag + String.format("WRONG endProtocol %Xh != %Xh"
+                                    , protocolEnd, rdByte));
+                        }
+
+                        err = true;
+                        break;
+                    }
+
+                    if (index != 0) {
+                        LogUtil.i(logTag + String.format("Complete sub-parsing actCmd %Xh", packet[7]));
+                    }
+
+                    //analysis packet
+                    //checksum============================================================================
+                    final int chkSumLen = pktLen - 1; //chksum
+                    byte calcChkSum = 0;
+
+                    for (int n = 0; n < chkSumLen; n++) calcChkSum += packet[n];
+
+                    final byte chkSum = packet[pktPos - 1]; //chksum
+
+                    if (chkSum != calcChkSum) {
+                        LogUtil.e(logTag + String.format("WRONG chksum %Xh != %Xh(calc)"
+                                , chkSum, calcChkSum));
+
+                        err = true;
+                        break;
+                    }
+                    //target id check=====================================================================
+                    final byte tgtId = packet[2];
+
+                    switch (tgtId) {
+                        //case 0x24 : //main
+                        case 0x25: //console
+                        case 0x26: //pc
+                            break;
+
+                        default:
+                            err = true;
+                            break;
+                    }
+
+                    if (err) {
+                        LogUtil.e(logTag + String.format("WRONG target id %Xh", tgtId));
+                        break;
+                    }
+
+                    //source id check=====================================================================
+                    final byte srcId = packet[3];
+
+                    switch (srcId) {
+                        case 0x24: //main
+                            // case 0x25 : //console
+                        case 0x26: //pc
+                            break;
+
+                        default:
+                            err = true;
+                            break;
+                    }
+
+                    if (err) {
+                        LogUtil.e(logTag + String.format("WRONG source id %Xh", srcId));
+                        break;
+                    }
+
+                    //target and source id matching=======================================================
+                    if (tgtId == srcId) {
+                        LogUtil.e(logTag + String.format("MATCHED ids %Xh == %Xh"
+                                , tgtId, srcId));
+
+                        err = true;
+                        break;
+                    }
+
+                    pktOk = true;
+                    break;
+                }
+
+                default: {
+                    LogUtil.e(logTag + String.format("UNDEFINED parsing step %d", psStep));
+                    err = true;
+                    break;
+                }
+            }
+
+            packet[pktPos] = rdByte;
+
+            if (++pktPos >= packet.length) {
+                LogUtil.e(logTag + "OVERFLOW packet length");
+                err = true;
+            }
+
+            if (err || pktOk) {
+                if (err) {
+                    err = false;
+
+                    if ((index == 0) || (pktPos > 1)) {
+                        LogUtil.e(logTag + parent.packetLogView(packet, pktPos));
+                    }
+
+                    if (index == 0) {
+                        rxIdleTime = parent.msTimeGet() + 10; // per ms, timeout set
+                    }
+                }
+
+                if (pktOk) {
+                    pktOk = false;
+                    //LogUtil.i(logTag + packetLogView(packet, pktPos)); // test
+                    parent.txQueueSender(packet[7]);
+
+                    boolean pass = parent.vosCountChecker(packet);
+
+                    if (pass){
+	                    final int ctrlCmd = packet[6] & 0xFF;
+	                    final int actCmd = packet[7] & 0xFF;
+	                    //Log.v("fwl", "\r\n");
+	                    //operationManager.markStatus(packetLogView(packet, pktPos));
+	                    boolean callback = false;
+	                    txQueue que = null;
+
+	                    for(Serial422.txQueue txQueue : txQueues){
+		                    que = txQueue;
+
+		                    if((que == null)
+			                    || (que.listener == null)
+			                    || (que.listenerCalled)
+			                    || ((que.id[2] & 0xFF) != ctrlCmd)
+			                    || ((que.id[3] & 0xFF) != actCmd)) continue;
+
+		                    //operationManager.markStatus(q.listenerCalled + " " + packetLogView(q.id, q.id.length));
+		                    callback = true;
+		                    break;
+	                    }
+
+	                    //operationManager.markStatus(callback + " " + (rxListener != null));
+
+											if(callback || (rxListener != null)){
+												int actDatStartPos = 8;
+												int subId = -1;
+												int ack = -1;
+
+												if(ctrlCmd == ControlCommandT5H.COMM_GET_INFO){
+													subId = packet[8] & 0xFF;
+													ack = packet[9] & 0xFF;
+													actDatStartPos += 2;
+												}
+
+												final int endLen = 2; // checksum(1) + endprotocol(1)
+												final int actDatEndPos = pktPos - endLen;
+												//operationManager.markStatus(packetLogView(packet, pktPos));
+												//operationManager.markStatus(packet.length + " " + actDatStartPos + " " + actDatEndPos );
+												final byte[] actDat = Arrays.copyOfRange(packet, actDatStartPos
+													, actDatEndPos);
+
+												if(callback){
+													que.listener.callback(ctrlCmd, actCmd, actDat, false, subId, ack);
+												}
+
+												if(rxListener != null){
+													//operationManager.markStatus("");
+
+													if(!rxListener.callback(ctrlCmd, actCmd, actDat, false, subId, ack)){
+														parent.OnReceiveDataParsing(packet, pktPos); // throw
+													}
+
+													//operationManager.markStatus("");
+												}
+											}else parent.OnReceiveDataParsing(packet, pktPos); // throw
+                    }
+                }
+
+                psStep = 0;
+                psTimeMark = 0;
+            }
+
+        }
+
+        void timeCheck() {
+            if ((psStep > 0) && (psTimeMark > 0) && (psTimeMark <= parent.msTimeGet())) {
+                //timeout
+                LogUtil.e(logTag + "TIMEOUT receive");
+                LogUtil.i(logTag + parent.packetLogView(packet, pktPos));
+                psStep = 0;
+                psTimeMark = 0;
+                parent.txQueueSendRetry();
+            }
+
+            if ((rxIdleTime > 0) && (rxIdleTime <= parent.msTimeGet())) {
+                rxIdleTime = 0;
+                //Log.i(logTag,"mark"); // test
+                parent.txQueueSendRetry();
+            }
+        }
+
+        void gatherClear() {
+            psStep = 0;
+            psTimeMark = 0;
+        }
+    } //@002 ▲
+
+    static txQueue[] txQueues; //@001
+    int txQueuePushPos; //@001
+    static int txQueuePopPos; //@001
+    static AtomicInteger txQueueSize; //@001
+    long txTimeout; //@001
+    static final String logTag = "Serial422::"; //@001
+    int vosCnt; //@001
+    int vosCntTarget; //@001
+    long vosTimeout; //@001
+    boolean vosRetry; //@001
+    AtomicBoolean txQueueFlushReq; //@001
+		static receiveListener rxListener = null;
+
+    private boolean txQueuePush(txQueue queue) { //@001 ▼
+        if (txQueueSize.get() >= txQueues.length){
+					operationManager.markError("txQueueSize.get() >= txQueues.length, "
+						+ txQueueSize.get() + " " + txQueues.length);
+
+					return false;
+        }
+
+        txQueues[txQueuePushPos] = queue;
+
+        if (txQueuePushPos >= (txQueues.length - 1)) txQueuePushPos = 0;
+        else txQueuePushPos++;
+
+        txQueueSize.incrementAndGet();
+        return true;
+    } //@001 ▲
+
+    private static void txQueueFlush() { //@001 ▼
+        if (txQueueSize.get() == 0) return;
+
+        txQueues[txQueuePopPos].expired = true;
+
+        if (txQueuePopPos >= (txQueues.length - 1)) txQueuePopPos = 0;
+        else txQueuePopPos++;
+
+        txQueueSize.decrementAndGet(); // --i;
+
+        //Log.i(logTag, String.format("flushed pos %d", txQueuePopPos)); //test
+    } //@001 ▲
+
+    @Nullable //@001
+    private static txQueue txQueueGet() { //@001 ▼
+        //if (txQueueSize.get() == 0) return null;
+
+        txQueue txq = null;
+
+        while (txQueueSize.get() > 0) {
+            txq = txQueues[txQueuePopPos];
+
+            if(txq == null) return null;
+
+            if(txq.expired) {
+                LogUtil.i(logTag + "INTERNAL:unexpected, expired == true??");
+                txQueueFlush();
+            }else if(genMgr.getFirmwareStatusBootIs()
+	            && !genMgr.getFirmwarePacketIs(txq.actCmd & 0xFF))
+            {
+							if(txq.listener != null){
+								txq.listener.callback(txq.ctrlCmd, txq.actCmd, null, true, 0, 0);
+								txq.listenerCalled = true;
+							}
+
+							//Log.d("fwl", String.format("%02Xh", txq.actCmd & 0xFF));
+	            txQueueFlush();
+            }else break;
+        }
+
+        return txq;
+    } //@001 ▲
+
+		public boolean validateSerialPort(){
+			boolean ret = true;
+
+			if(mT5HHandler == null){
+				Log.e("fwl", "handler == null");
+				ret = false;
+			}
+
+			if(mT5HCaliHandler == null){
+				Log.e("fwl", "calihandler == null");
+				ret = false;
+			}
+
+			if(mT5HAutoHandler == null){
+				Log.e("fwl", "autohandler == null");
+				ret = false;
+			}
+
+			if(mT5HGenInfoHandler == null){
+				Log.e("fwl", "autokvhandler == null");
+				ret = false;
+			}
+
+			if(mT5HGenInfoHandler == null){
+				Log.e("fwl", "geninfohandler == null");
+				ret = false;
+			}
+
+			if(mT5HScopeHandler == null){
+				Log.e("fwl", "ScopeHandler == null");
+				ret = false;
+			}
+
+			if(mT5HStatusBarHandler == null){
+				Log.e("fwl", "statusBarHandler == null");
+				ret = false;
+			}
+
+			return ret;
+		}
+
+    public void SerialPortStart() {
+        OpenSerialPort(SERIAL_PORT_NAME);
+        StartRxThred();
+
+        if (true) { //@001 ▼
+            txQueues = new txQueue[10];
+            txQueuePushPos = txQueuePopPos = 0;
+            txQueueSize = new AtomicInteger(0);
+            txQueueFlushReq = new AtomicBoolean(false);
+            txQueueSize.set(0);
+        } //@001 ▲
+
+        LogUtil.i("Serial422::SerialPortStart");
+    }
+
+    public void OpenSerialPort(String name) {
+        SerialPortFinder serialPortFinder = new SerialPortFinder();
+        String[] devices = serialPortFinder.getAllDevices();
+        String[] devicesPath = serialPortFinder.getAllDevicesPath();
+
+        for (int i = 0; i < devices.length; i++) {
+            String device = devices[i];
+            if (device.contains(name)) {
+                try {
+                    mSerialPort = new SerialPort(new File(devicesPath[i]), SERIAL_BAUDRATE, 0);
+                    break;
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+
+        if (mSerialPort != null) {
+            mInputStream = mSerialPort.getInputStream();
+            mOutputStream = mSerialPort.getOutputStream();
+            LogUtil.i("Serial422::SetSerialPort, Make Input,Output Stream");
+        }
+    }
+
+    public void StartRxThred() {
+        if (mInputStream == null) {
+            LogUtil.i("Serial422::SetSerialPort, Can't Open InputStream");
+            return;
+        } else {
+            LogUtil.i("Serial422::SetSerialPort, Open InputStream Success ");
+        }
+
+        arrayRxParsing = new rxParsing[2]; //@002
+
+        for (int i = 0; i < arrayRxParsing.length; i++) { //@002
+            arrayRxParsing[i] = new rxParsing(i, this, logTag); //@002
+        }
+
+        mReadThread = new ReadThread();
+        mReadThread.start();
+    }
+
+    byte bRcvBuf[] = new byte[1024];
+    int nOffset = 0;
+
+    public void SetD5Handler(T5HHandler h) {
+        mT5HHandler = h;
+    }
+
+    public void SetD5CaliHandler(T5HCaliHandler h) {
+        mT5HCaliHandler = h;
+    }
+
+    public void SetD5AutoHandler(T5HAutoHandler h) {
+        mT5HAutoHandler = h;
+    }
+
+    public void SetD5AutoKvHandler(T5HAutoKvHandler h) {
+        mT5HAutoKvHandler = h;
+    }
+
+    public void SetD5GenInfoHandler(T5HGenInfoHandler h) {
+        mT5HGenInfoHandler = h;
+    }
+
+    public void setD5ScopeHandler(T5HOscilloscopeHandler h) {
+        mT5HScopeHandler = h;
+    }
+    public void setD5StatusBarHandler(T5HStatusBarHandler h)
+    {
+        mT5HStatusBarHandler = h;
+    }
+
+    void OnReceiveData(byte[] buffer, int size) {
+        try {
+            System.arraycopy(buffer, 0, bRcvBuf, nOffset, size);
+            nOffset += size;
+            //LogUtil.i("Serial422::OnReceiveData, Size : " + size + " ReadResponse: " + byteArrayToString(bRcvBuf, nOffset));
+
+            bRcvBuf = null;
+            bRcvBuf = new byte[1024];
+            nOffset = 0;
+
+        } catch (Exception ex) {
+            LogUtil.i(ex.getMessage());
+        }
+
+        //0: First 1: Second 2: Target 3: Source 4,5: Length 6: ControlCommand 7: ActionCommand 8~:Data Checksum End(0x21)
+        StringBuilder stringBuilder = new StringBuilder();
+        for (int i = 0; i < size; i++) {
+            stringBuilder.append(String.format("%02x ", buffer[i]));
+        }
+
+        //LogUtil.i("Serial422::OnReceiveData Ori(Hex) : " + stringBuilder.toString() + " Size : " + size);
+        OnReceiveDataParsing(buffer, size);
+
+    }
+
+    private String byteArrayToString(byte[] a, int nSize) {
+        StringBuilder sb = new StringBuilder();
+        int nBreak = 0;
+        for (final byte b : a) {
+            sb.append(String.format("0x%02x ", b & 0xff));
+            nBreak++;
+            if (nBreak >= nSize) {
+                break;
+            }
+        }
+        return sb.toString();
+    }
+
+    byte newbuffer[] = new byte[2];
+
+
+    void OnReceiveDataParsing(byte[] buffer, int size) {
+        //0: First 1: Second 2: Target 3: Source 4,5: Length 6: ControlCommand 7: ActionCommand 8~:Data Checksum End(0x21)
+        StringBuilder stringBuilder = new StringBuilder();
+        for (int i = 0; i < size; i++) {
+            stringBuilder.append(String.format("%02x", buffer[i]));
+        }
+
+        int datasize = size - 10;
+        //LogUtil.i("Serial422::OnReceiveDataParsing ReceiveData datasize : " + datasize + ", buffer : " + byteArrayToString(buffer,size));
+
+        /**
+         * Gen Log 패킷 길이에 따른 조건식으로 설계
+         * First Data 가 0이 들어오면 F/W 요청 그만.
+         * 나중에 필터링도 들어갈 염려...
+         * Handler 안쓰고 통신 Thread 에서  * 24.05.22 추가 : 처리 저장은 새로운 Thread에서 처리. *
+         * 굳이 화면에 데이터를 보낼 필요 X
+         * **/
+
+        if ((buffer[7] & 0XFF) == ActionCommandT5H.GEN_LOG_POP)
+        {
+            long totaltime = ((long)(buffer[8]& 0XFF) << 24) | ((long)(buffer[9] & 0XFF)<< 16) | ((long)(buffer[10]& 0XFF) << 8) | buffer[11] & 0XFF;
+            long hour = (totaltime / 1000) / 3600;
+            long minute = ((totaltime / 1000) / 60) % 60;
+            long second = (totaltime / 1000) % 60;
+            long millisec = totaltime % 1000;
+
+            String FirstData = hour + ":" + minute + ":" + second + "." + millisec;
+            int SecondData = (int)(buffer[12] & 0xFF);
+            int ThirdData = 0;
+            int FourthData = 0;
+            int FifthData = 0;
+            switch(datasize)
+            {
+                // Case 5 : Third Data 가 없을 때까지 데이터를 전송 해 줘야댐.
+                // Third Data 가 없는 패킷을 수신 하게 된 경우 데이터 요청 Stop
+                case 6 :
+                    ThirdData = (int)(buffer[13] & 0xFF);
+                    break;
+                // Fourth Data가 하나인 경우, 두개인 경우 조건 유의
+                case 7 :
+                    ThirdData = (int)(buffer[13] & 0xFF);
+                    FourthData = (int)(buffer[14] & 0XFF);
+                    break;
+                case 8:
+                    if (SecondData == 8 || SecondData == 7)
+                    {
+                        ThirdData = (int)(buffer[13] & 0xFF);
+                        FourthData = (int)(buffer[14] & 0XFF);
+                        FifthData = (int)(buffer[15] & 0xFF);
+                    }
+                    else
+                    {
+                        ThirdData = (int)(buffer[13] & 0xFF);
+                        FourthData = ((int)(buffer[14] << 8) | (int)buffer[15] & 0XFF);
+                    }
+                    break;
+                case 10:
+                    ThirdData = (int)(buffer[13] & 0xFF);
+                    FourthData = ((int)(buffer[14] << 8) | (int)buffer[15] & 0XFF);
+                    FifthData = ((int)(buffer[16] << 8) | (int)buffer[17] & 0XFF);
+                    break;
+                default:
+                    break;
+            }
+//            if(SecondData == 10)
+//            {
+//                LogUtil.i("::OnReceiveDataParsing :: GEN_LOG_POP datasize: " + datasize + " , packet : " + bytesToHexString(buffer,size));
+//                LogUtil.i("::OnReceiveDataParsing :: GEN_LOG_POP datasize: " + FourthData);
+//            }
+            LinkedHashMap<String,String> ErrWarningHash = new LinkedHashMap<>();
+            // LogUtil.i("Serial422 ::OnReceiveDataParsing GEN_LOG_POP : " + bytesToHexString(buffer,size));
+            // Second Data가 8 , 7 일 경우에는 Fourth , Fifth 데이터를 Hex 값으로 변환 후 저장해야댐.
+            if(SecondData == 8 || SecondData == 7)
+            {
+                ErrWarningHash.put("FirstData", FirstData);
+                ErrWarningHash.put("SecondData", String.valueOf(SecondData));
+                ErrWarningHash.put("ThirdData", String.valueOf(ThirdData));
+                ErrWarningHash.put("FourthData", Integer.toHexString(FourthData));
+                ErrWarningHash.put("FifthData", Integer.toHexString(FifthData));
+                T5HSystem.InfoHash.put("Data" + T5HSystem.InfoCount++,ErrWarningHash);
+                T5HSystem.GeneratorLogRequest(1);
+            }
+            // First Data 가 0일 경우 데이터 요청 Stop & 데이터 저장
+            // 나머지 변수들 초기화
+            else if((int)(buffer[8]& 0XFF) == 0)
+            {
+//                ErrWarnInfoDataManager.saveXmlErrWarnInfoData(T5HSystem.InfoHash);
+                ErrWarnInfoDataManager errWarnInfoDataManager = new ErrWarnInfoDataManager();
+                errWarnInfoDataManager.data = T5HSystem.InfoHash;
+//                LogUtil.i("ErrWarnInfoDataManager :: Check Data : " + errWarnInfoDataManager.data);
+                errWarnInfoDataManager.start();
+                T5HSystem.InfoCount = 1;
+            }
+            else
+            {
+                ErrWarningHash.put("FirstData", FirstData);
+                ErrWarningHash.put("SecondData", String.valueOf(SecondData));
+                ErrWarningHash.put("ThirdData", String.valueOf(ThirdData));
+                ErrWarningHash.put("FourthData", String.valueOf(FourthData));
+                ErrWarningHash.put("FifthData", String.valueOf(FifthData));
+                T5HSystem.InfoHash.put("Data" + T5HSystem.InfoCount++,ErrWarningHash);
+                T5HSystem.GeneratorLogRequest(1);
+            }
+            //LogUtil.i("::OnReceiveDataParsing :: GEN_LOG_POP : " + " , packet : " + bytesToHexString(buffer,size));
+            return;
+        }
+        /**
+         * T_BOARD_VERSION 패킷 특성 상 2byte에서 6byte 까지 들어올 수 있음
+         * 데이터 사이즈별로 조건문 X
+         * 액션 커맨드로 조건문 둔 채 값을 다 받았으면 return으로 메서드 종료
+         * return 없으면 데이터 사이즈 조건문 타서 핸들러로 데이터 두번 보냄...
+         * **/
+        if ((buffer[7] & 0XFF) == ActionCommandT5H.T_BOARD_VERSION)
+        {
+            int datavalue_board = 0;
+            datavalue_board = ((int) buffer[10] & 0XFF);
+            int major = 0;
+            int minor = 0;
+            int year = 0;
+            int month = 0;
+            int day = 0;
+            int connect = 0;
+            String datavalue_boardver = "";
+            int bufnum = 0;
+            //final StringBuilder stb = new StringBuilder();
+            if (datavalue_board == 0)
+            {
+                major = ((int) buffer[11] & 0XFF);
+                minor = ((int) buffer[12] & 0XFF);
+                year = ((int) buffer[13] & 0XFF);
+                month = ((int) buffer[14] & 0XFF);
+                day = ((int) buffer[15] & 0XFF);
+                datavalue_boardver = major + "," + minor + "," + year + "," + month + "," + day;
+                Message msg4 = Message.obtain(mT5HGenInfoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue_board, datavalue_boardver);
+                mT5HGenInfoHandler.sendMessage(msg4);
+            }
+            else
+            {
+                connect = ((int) buffer[11] & 0XFF);
+                Message msg4 = Message.obtain(mT5HGenInfoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue_board, connect);
+                mT5HGenInfoHandler.sendMessage(msg4);
+            }
+            LogUtil.i("Serial422::Test Bufnum Final data type : " + datavalue_board + " Connect : " + connect + " ver : " + datavalue_boardver);
+            return;
+        }
+        if((buffer[7] & 0XFF) == ActionCommandT5H.HEART_BEAT)
+        {
+            Message msg = Message.obtain(mT5HHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, 0);
+            mT5HHandler.sendMessage(msg);
+            //LogUtil.i("Serial422 ::Heart_BEAT Receive");
+            return;
+        }
+        if((buffer[7] & 0XFF) == ActionCommandT5H.WARNING_CODE || (buffer[7] & 0XFF) == ActionCommandT5H.ERROR_CODE)
+        {
+		        final int ctrlCmd = buffer[6] & 0xFF;
+		        final int ack = buffer[9] & 0xFF;
+
+						if((ctrlCmd == ControlCommandT5H.COMM_GET_INFO) && (ack == 0/*ackOK*/)){
+							// COMM_GET_INFO로 수신되면 COMM_STATUS_INFO로 변조
+							buffer[6] = ControlCommandT5H.COMM_STATUS_INFO;
+							buffer[8] = buffer[8 + 2];
+							buffer[9] = buffer[9 + 2];
+						}
+
+            int dataValue = ((int) buffer[9] & 0XFF);
+            Message msgStatus = Message.obtain(mT5HStatusBarHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, dataValue);
+            mT5HStatusBarHandler.sendMessage(msgStatus);
+            switch(_t5hStatus)
+            {
+                case Normal:
+                    Message msg = Message.obtain(mT5HHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, dataValue);
+                    mT5HHandler.sendMessage(msg);
+                    break;
+                case CalibrationMain: case AECCalibration: case kVCalibration: case mACalibration: case msTuning: case mAFeedbackCalibration:
+                    Message msg1 = Message.obtain(mT5HCaliHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, dataValue);
+                    mT5HCaliHandler.sendMessage(msg1);
+                    break;
+                case AutoExpose:
+                    Message msg2 = Message.obtain(mT5HAutoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, dataValue);
+                    mT5HAutoHandler.sendMessage(msg2);
+                    break;
+                case kVExpose:
+                    Message msg3 = Message.obtain(mT5HAutoKvHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, dataValue);
+                    mT5HAutoKvHandler.sendMessage(msg3);
+                    break;
+                case GenInfo:
+                    Message msg4 = Message.obtain(mT5HGenInfoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, dataValue);
+                    mT5HGenInfoHandler.sendMessage(msg4);
+                    break;
+                case ScopeMode:
+                    Message msg5 = Message.obtain(mT5HScopeHandler, buffer[6] & 0xFF, buffer[7] & 0xFF, dataValue);
+                    mT5HScopeHandler.sendMessage(msg5);
+                    break;
+                default:
+                    // 다른 화면 외 Status 가 지정되지 않는 곳에서 에러가 생기는 경우 Error Log 적용
+                    ErrorLogUtil.e("Serial422 :: Occurred on a " + _t5hStatus + " with no error or warning specified." );
+                    ErrorLogUtil.e("Serial422 :: Error & Warning DataValue : " + dataValue);
+                    break;
+            }
+            return;
+        }
+        // Message.Obtain 매개변수가 int 형이라 소수점은 String으로 붙혀서 보내주기
+        if((buffer[7] & 0XFF) == ActionCommandT5H.TIME_FB_VALUE)
+        {
+            int datavalue = ((int) buffer[8] << 8) + ((int) buffer[9] & 0XFF);
+            int datavalue1 = ((int) buffer[10] & 0XFF);
+            String datavalue2 = datavalue + "" + datavalue1;
+            int datavalue3 = Integer.parseInt(datavalue2);
+            LogUtil.i("Serial422::ReceviceDataParsing TIME_FB_VALUE : " + datavalue3);
+            switch(_t5hStatus)
+            {
+                case Normal:
+                    Message msg = Message.obtain(mT5HHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue3);
+                    mT5HHandler.sendMessage(msg);
+                    break;
+                case AutoExpose:
+                    Message msg2 = Message.obtain(mT5HAutoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue3);
+                    mT5HAutoHandler.sendMessage(msg2);
+                    break;
+                case CalibrationMain: case AECCalibration: case kVCalibration: case mACalibration: case msTuning: case mAFeedbackCalibration:
+                    Message msg3 = Message.obtain(mT5HCaliHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue3);
+                    mT5HCaliHandler.sendMessage(msg3);
+                    break;
+                case ScopeMode:
+                    Message msg4 = Message.obtain(mT5HScopeHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue3);
+                    mT5HScopeHandler.sendMessage(msg4);
+                    break;
+                case kVExpose:
+                    Message msg5 = Message.obtain(mT5HAutoKvHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue3);
+                    mT5HAutoKvHandler.sendMessage(msg5);
+                    break;
+                default:
+                    break;
+            }
+            return;
+        }
+        if (datasize == 0)
+        {
+            //LogUtil.i("SetSerialPort, ReceiveData Test datavalue size 0" );
+            Message msg = Message.obtain(mT5HHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, 0);
+            mT5HHandler.sendMessage(msg);
+            Message msg1 = Message.obtain(mT5HCaliHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, 0);
+            mT5HCaliHandler.sendMessage(msg1);
+            Message msg2 = Message.obtain(mT5HAutoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, 0);
+            mT5HAutoHandler.sendMessage(msg2);
+            Message msg3 = Message.obtain(mT5HAutoKvHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, 0);
+            mT5HAutoKvHandler.sendMessage(msg3);
+            Message msg4 = Message.obtain(mT5HGenInfoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, 0);
+            mT5HGenInfoHandler.sendMessage(msg4);
+            Message msg5 = Message.obtain(mT5HScopeHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, 0);
+            mT5HScopeHandler.sendMessage(msg5);
+            Message msg6 = Message.obtain(mT5HStatusBarHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, 0);
+            mT5HStatusBarHandler.sendMessage(msg6);
+        }
+        else if (datasize == 1)
+        {
+            int datavalue = (int) buffer[8] & 0XFF;
+            //LogUtil.i("SetSerialPort, ReceiveData Test datavalue size 1 : " +  datavalue );
+            Message msg = Message.obtain(mT5HHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HHandler.sendMessage(msg);
+            Message msg1 = Message.obtain(mT5HCaliHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HCaliHandler.sendMessage(msg1);
+            Message msg2 = Message.obtain(mT5HAutoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HAutoHandler.sendMessage(msg2);
+            Message msg3 = Message.obtain(mT5HAutoKvHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HAutoKvHandler.sendMessage(msg3);
+            Message msg4 = Message.obtain(mT5HGenInfoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HGenInfoHandler.sendMessage(msg4);
+            Message msg5 = Message.obtain(mT5HScopeHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HScopeHandler.sendMessage(msg5);
+            Message msg6 = Message.obtain(mT5HStatusBarHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HStatusBarHandler.sendMessage(msg6);
+        }
+        else if (datasize == 2)
+        {
+            int datavalue = ((int) buffer[8] << 8) + ((int) buffer[9] & 0XFF);
+            int datavalue1 = 0;
+            if ((buffer[7] & 0XFF) == ActionCommandT5H.WARNING_CODE || (buffer[7] & 0XFF) == ActionCommandT5H.ERROR_CODE) {
+                datavalue = ((int) buffer[9] & 0XFF);
+            }
+
+            //LogUtil.i("SetSerialPort, ReceiveData Test datavalue size 2 : " +  datavalue  + " 1 : " + ((int)buffer[8]<<8)+ " 2 : " + ((int)buffer[9]&0XFF));
+            Message msg = Message.obtain(mT5HHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HHandler.sendMessage(msg);
+            Message msg1 = Message.obtain(mT5HCaliHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HCaliHandler.sendMessage(msg1);
+            Message msg2 = Message.obtain(mT5HAutoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HAutoHandler.sendMessage(msg2);
+            Message msg3 = Message.obtain(mT5HAutoKvHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HAutoKvHandler.sendMessage(msg3);
+            Message msg4 = Message.obtain(mT5HGenInfoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HGenInfoHandler.sendMessage(msg4);
+            Message msg5 = Message.obtain(mT5HScopeHandler, buffer[6] & 0xFF, buffer[7] & 0xFF, datavalue);
+            mT5HScopeHandler.sendMessage(msg5);
+            Message msg6 = Message.obtain(mT5HStatusBarHandler, buffer[6] & 0xFF, buffer[7] & 0xFF, datavalue);
+            mT5HStatusBarHandler.sendMessage(msg6);
+        }
+        else if (datasize == 3)
+        {
+            int datavalue = ((int) buffer[8] << 16) + ((int) buffer[9] & 0XFF << 8) + ((int) buffer[10] & 0XFF);
+            int datavalue1 = 0;
+
+            if ((buffer[7] & 0XFF) == ActionCommandT5H.POWER_DIAGNOSIS) {
+                datavalue = ((int) buffer[9] << 8) + ((int) buffer[10] & 0XFF << 0);     // DATA Value
+
+                datavalue1 = ((int) buffer[8]);  // Command Value
+                Message msgcom = Message.obtain(mT5HGenInfoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue1, datavalue);
+                mT5HGenInfoHandler.sendMessage(msgcom);
+                //LogUtil.i("SetSerialPort, ReceiveData Ori(HEX 4) dara kV mA datavalue size value1 : " +  datavalue1  + " value2 : " + datavalue);
+            }
+            if ((buffer[7] & 0XFF) == ActionCommandT5H.FB_SCOPE_DATA_CURRENT || (buffer[7] & 0XFF) == ActionCommandT5H.FB_SCOPE_DATA_STATUS) {
+                datavalue = (int) buffer[8] & 0XFF;
+                datavalue1 = ((int) buffer[9] << 8) + ((int) buffer[10] & 0XFF << 0);
+                Message msScopeCF = Message.obtain(mT5HScopeHandler, buffer[6] & 0xFF, buffer[7] & 0xFF, datavalue, datavalue1);
+                mT5HScopeHandler.sendMessage(msScopeCF);
+//                LogUtil.i("SetSerialPort, ReceiveData FB_SCOPE_CONFIG : " +  datavalue  + " value2 : " + datavalue1);
+            }
+            // Scope Data (Count, Time)
+            if ((buffer[7] & 0XFF) == ActionCommandT5H.FB_SCOPE_CONFIG) {
+                datavalue = (int) buffer[8] & 0XFF;// Time value(1byte) : 1~1000, ex) 1 -> 100us, 10 -> 1ms, 100 -> 10ms
+                datavalue1 = ((int) buffer[9] << 8) + ((int) buffer[10] & 0XFF << 0);// Total Count Value(2byte) : 0~10000 , F/W에서 현재 0 처리 , Filament, Rotor 모드일 떈 Null (Null 처리 필수!!)
+                // -> MainActivity Arcing Count Value
+                if (_t5hStatus == T5HSystem.Status.Normal) {
+                    LogUtil.i("SetSerialPort, ReceiveData FB_SCOPE_CONFIG : " + datavalue + " value2 : " + datavalue1);
+                    Message msScopeCF3 = Message.obtain(mT5HHandler, buffer[6] & 0xFF, buffer[7] & 0xFF, datavalue, datavalue1);
+                    mT5HHandler.sendMessage(msScopeCF3);
+                }
+                // -> AutoExpose Arcing Count Value
+                else if (_t5hStatus == T5HSystem.Status.AutoExpose) {
+                    Message msScopeCF4 = Message.obtain(mT5HAutoHandler, buffer[6] & 0xFF, buffer[7] & 0xFF, datavalue, datavalue1);
+                    mT5HAutoHandler.sendMessage(msScopeCF4);
+                }
+                // -> Scope Mode
+                else {
+                    Message msScopeCF2 = Message.obtain(mT5HScopeHandler, buffer[6] & 0xFF, buffer[7] & 0xFF, datavalue, datavalue1);
+                    mT5HScopeHandler.sendMessage(msScopeCF2);
+                }
+                LogUtil.i("SetSerialPort, ReceiveData SCOPE_CONFIG: " + datavalue + " value2 : " + datavalue1);
+            }
+            Message msg = Message.obtain(mT5HHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HHandler.sendMessage(msg);
+            Message msg1 = Message.obtain(mT5HCaliHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HCaliHandler.sendMessage(msg1);
+            Message msg2 = Message.obtain(mT5HAutoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HAutoHandler.sendMessage(msg2);
+            Message msg3 = Message.obtain(mT5HAutoKvHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HAutoKvHandler.sendMessage(msg3);
+            // Message msg4 = Message.obtain(mD5GenInfoHandler,buffer[6]&0XFF,buffer[7]&0XFF,datavalue);
+            //mD5GenInfoHandler.sendMessage(msg4);
+//            Message msg5 = Message.obtain(mD5ScopeHandler,buffer[6]&0xFF, buffer[7]&0xFF,datavalue);
+//            mD5ScopeHandler.sendMessage(msg5);
+        }
+        else if (datasize == 4)
+        {
+            int datavalue = ((int) buffer[8] << 32) + ((int) buffer[9] & 0XFF << 16) + ((int) buffer[10] & 0XFF << 8) + ((int) buffer[11] & 0XFF);
+            int datavalue1 = 0;
+
+            if ((buffer[7] & 0XFF) == ActionCommandT5H.KV_FB_VALUE || (buffer[7] & 0XFF) == ActionCommandT5H.MA_FB_VALUE) {
+                datavalue = ((int) buffer[8] << 8) + ((int) buffer[9] & 0XFF << 0);     // kV, mA Value
+                datavalue1 = ((int) buffer[10] << 8) + ((int) buffer[11] & 0XFF << 0);  // DAC Value
+                //LogUtil.i("SetSerialPort, ReceiveData Ori(HEX 4) dara kV mA datavalue size value1 : " +  datavalue  + " value2 : " + datavalue1);
+            }
+            //LogUtil.i("SetSerialPort, ReceiveData Ori(HEX 4) dara Test datavalue size value1 : " +  datavalue  + " value2 : " + datavalue1);
+            Message msg = Message.obtain(mT5HHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HHandler.sendMessage(msg);
+            Message msg1 = Message.obtain(mT5HCaliHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HCaliHandler.sendMessage(msg1);
+            Message msg2 = Message.obtain(mT5HAutoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HAutoHandler.sendMessage(msg2);
+            Message msg3 = Message.obtain(mT5HAutoKvHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HAutoKvHandler.sendMessage(msg3);
+            Message msg4 = Message.obtain(mT5HGenInfoHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HGenInfoHandler.sendMessage(msg4);
+            Message msg5 = Message.obtain(mT5HScopeHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue);
+            mT5HScopeHandler.sendMessage(msg5);
+        }
+        else if (datasize == 6)
+        {
+            //2^11=2048, 2^7=127, 2^3=8
+            int datavalue = ((int) buffer[8] << 2048) + ((int) buffer[9] << 128) + ((int) buffer[10] << 8) + ((int) buffer[11] & 0XFF << 8);
+            int datavalue1 = 0;
+            int datavalue2 = 0;
+            //LogUtil.i("SetSerialPort, ReceiveData Ori(HEX 6) dara kV mA datavalue size value1 data  : " +datavalue +" t1: " +  ((int)buffer[10]&0XFF<<8) + " " + (int)buffer[10] );
+
+            //Scope Data ( Count, kv , ma )
+            if ((buffer[7] & 0XFF) == ActionCommandT5H.FB_SCOPE_DATA_KV_MA || (buffer[7] & 0XFF) == ActionCommandT5H.FB_SCOPE_DIV_SCALE) {
+                datavalue = ((int) buffer[8] << 8) + ((int) buffer[9] & 0XFF);
+                datavalue1 = ((int) buffer[10] << 8) + ((int) buffer[11] & 0XFF);
+                datavalue2 = ((int) buffer[12] << 8) + ((int) buffer[13] & 0XFF);
+                List<Integer> datalist = new ArrayList<>();
+                datalist.add(datavalue1);
+                datalist.add(datavalue2);
+                // -> MainActivity Arcing Data Value
+                if (_t5hStatus == T5HSystem.Status.Normal) {
+                    Message msg1 = Message.obtain(mT5HHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue, datalist);
+                    mT5HHandler.sendMessage(msg1);
+                }
+                // -> AutoExpose Arcing Data Value
+                else if (_t5hStatus == T5HSystem.Status.AutoExpose) {
+                    Message msg2 = Message.obtain(mT5HAutoHandler, buffer[6] & 0xFF, buffer[7] & 0xFF, datavalue, datalist);
+                    mT5HAutoHandler.sendMessage(msg2);
+                }
+                // -> Scope Mode
+                else {
+                    Message msg = Message.obtain(mT5HScopeHandler, buffer[6] & 0XFF, buffer[7] & 0XFF, datavalue, datalist);
+                    mT5HScopeHandler.sendMessage(msg);
+                }
+//                LogUtil.i("2. Size : SetSerialPort, ReceiveData Ori(HEX 6) Scope Data : " + datavalue + " // " + datavalue1 + " // " + datavalue2);
+            }
+            //Scope Scale Packet
+
+        }
+
+        //LogUtil.i("Serial422::OnReceiveDataParsing(Hex) Control Command : " + Integer.toHexString(buffer[6]) + " Action Command : " + Integer.toHexString(0xFF & buffer[7]));
+    }
+
+    public static String bytesToDecString(byte[] bytes) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < bytes.length; i++) {
+            sb.append(bytes[i] + " ");
+        }
+        return sb.toString();
+    }
+
+    //11-16 추가
+    public static String bytesToHexString(byte[] bytes, int size) {
+        StringBuilder sb = new StringBuilder();
+        //for(byte b : bytes)
+        for (int i = 0; i < size; i++) {
+            byte b = bytes[i];
+            sb.append(String.format("%02x ", b & 0xff));
+        }
+        return sb.toString();
+    }
+
+
+    void SendData(byte[] data) {
+        if (mOutputStream == null) {
+            LogUtil.i("Serial422::SendData Can't Open OutputStream");
+            return;
+        }
+        try {
+            mOutputStream.write(data);
+            //LogUtil.i("Serial422::SendData Success Data Hex : " + bytesToHexString(data));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public byte[] ConvertIntToByteArray(int databyte, int data) {
+        int shiftvalue = databyte - 1;
+        if (shiftvalue < 0) {
+            shiftvalue = 0;
+        }
+        byte[] bydata = new byte[databyte + 1];
+        for (int i = 0; i < databyte; i++) {
+            bydata[i] = (byte) (data >> ((shiftvalue - i) * 8));
+            // LogUtil.i(String.format("Serial422::ConvertIntToByteArray [" + i + "] : "+"%02X ", bydata[i]));
+        }
+        return bydata;
+    }
+
+		public void SerialSend(int len, int controlCmd, int actionCmd, byte[] szData){
+			SerialSend(len, controlCmd, actionCmd, szData, null, false);
+		}
+
+		public void SerialSend(int controlCmd, int actionCmd, byte[] szData, receiveListener listener){
+			final int len = szData != null ? szData.length : 0;
+			SerialSend(len, controlCmd, actionCmd, szData, listener, (listener == null));
+		}
+
+		public boolean SerialListener(receiveListener listener){
+			rxListener = listener;
+			return true;
+		}
+
+    @SuppressLint("DefaultLocale") //@001
+    public void SerialSend(int len, int controlCmd, int actionCmd, byte[] szData
+	    , receiveListener listener, boolean noRetry)
+    {
+        int callen = len + 9;
+        byte[] id = {(byte) ((callen >> 8) & 0xff), (byte) (callen & 0xff), (byte) (controlCmd & 0xff), (byte) (actionCmd & 0xff)};
+        //LogUtil.i("Serial422::SerialSend, Length : " +id[0] +  " " +id[1] + " ControlCmd : " + id[2] + " ActionCmd : " + id[3]) ;
+
+        if (true) { //@001 ▼
+            while (txQueueSize.get() >= txQueues.length) { // is full??
+                LogUtil.i(logTag + String.format("Fully txQueues!!, force flushing.., pushPos %d"
+                        , txQueuePushPos));
+                //flush
+                txQueueFlushReq.set(true);
+
+                while (txQueueFlushReq.get()) { // is flushing??
+                    SystemClock.sleep(1);
+                }
+            }
+
+            txQueue txq = new txQueue(len, id, szData, listener, noRetry);
+
+            if (!txQueuePush(txq)) {
+                LogUtil.i(logTag + "txQueue array full!!");
+            }
+        } else { //@001 ▲
+            //@001 SerialData(len, id, szData);
+        } //@001
+    }
+
+    // CheckSum boolean::: true : Success , False : Fail
+    public boolean SerialReceiveCheckSum(int length, byte[] buffer) {
+        byte checksum = 0;
+        for (int n = 0; n < length - 2; n++)
+            checksum += buffer[n];
+
+        if ((buffer[length - 2] & 0xff) == (checksum & 0xff)) {
+            return true;
+        } else {
+            LogUtil.i("Check FB : " + buffer[length - 2] + " / " + checksum);
+            LogUtil.i("Check FB : " + length + " Buffer : " + bytesToHexString(buffer, length));
+            return false;
+        }
+
+    }
+
+    public void SerialData(int len, byte[] id, byte[] data) {
+        byte[] sendPacket = new byte[10 + len]; // 11+len to 10+len
+        byte checksum = 0;
+
+        sendPacket[0] = 0x23; // First Protocol
+        sendPacket[1] = 0x50; // Second Protocol
+        sendPacket[2] = 0x24; // Target ID(Main)
+        sendPacket[3] = 0x25; // Source ID(Android)
+
+        sendPacket[4] = id[0]; // Length
+        sendPacket[5] = id[1]; // length(8+Data Num, 2Byte)
+        sendPacket[6] = id[2]; // Control Command
+        sendPacket[7] = id[3]; // Action Command
+        String log = "";
+
+        //LogUtil.i(String.format("Serial422::SerialData Length : "+"%02X ",  sendPacket[5]));
+        //LogUtil.i("Serial422::SerialData Length:" + sendPacket[4] + " " + sendPacket[5] + " " +sendPacket[6] + " " +sendPacket[7] + " " +sendPacket[8] + " " +sendPacket[9] + " ");
+
+
+        int shiftvalue = len - 1;
+        if (shiftvalue < 0) {
+            shiftvalue = 0;
+        }
+
+        for (int n = 0; n < len; n++)  //data
+        {
+						sendPacket[8 + n] = data != null ? data[n] : 0;
+        }
+        for (int i = 0; i <= 7 + len; i++)
+            checksum += sendPacket[i];
+
+        if (len == 0) {
+            //LogUtil.i(String.format("SetSerialPort, SerialData CheckSum Len is 0 : "+"%02X ", checksum));
+            sendPacket[8] = checksum; // Check Sum
+            sendPacket[9] = 0x21; // End
+        } else {
+            //LogUtil.i(String.format("SetSerialPort, SerialData CheckSum : sendPacket["+(8+len)+ "] "+"%02X " , checksum));
+            sendPacket[8 + len] = checksum; // Check Sum
+            sendPacket[9 + len] = 0x21; // End
+        }
+        //LogUtil.i("Serial422::SerialData Length:" + sendPacket[4] + " " + sendPacket[5] + " " +sendPacket[6] + " " +sendPacket[7] + " " +sendPacket[8] + " " +sendPacket[9] + " ");
+
+        SendData(sendPacket);
+        SystemClock.sleep(1);
+    }
+
+    public void closeSerialPort() {
+        if (mSerialPort != null) {
+            mSerialPort.close();
+            mSerialPort = null;
+        }
+
+        if (mReadThread != null) {
+            mReadThread.interrupt();
+            mReadThread = null;
+        }
+    }
+
+    protected void onDestroy() {
+        if (mReadThread != null) {
+            mReadThread.interrupt();
+            closeSerialPort();
+            mSerialPort = null;
+        }
+        //super.onDestroy();
+    }
+
+    class ReadThread extends Thread {
+        @SuppressLint("DefaultLocale") //@001
+        @Override
+        public void run() {
+
+            byte[] streamBuf = new byte[160]; //@001
+            int rdLen = 0;
+            int testCnt = 0;
+
+            for (rxParsing rxParsing : arrayRxParsing) { //@002
+                rxParsing.gatherClear(); //@002
+            }
+
+            while (!isInterrupted()) {
+                // 정상동작
+                try {
+                    if (true) { //@001 ▼
+                        if (mInputStream.available() > 0) {
+                            rdLen = mInputStream.read(streamBuf);
+                        } else {
+                            rdLen = 0;
+                            SystemClock.sleep(1);
+                        }
+                    } //@001 ▲
+
+                } catch (IOException e) {
+                    LogUtil.e("Serial422::ReadThread ERROR");
+                    e.printStackTrace();
+                } catch (ArrayIndexOutOfBoundsException e) {
+                    LogUtil.e("Serial422::ReadThread ArrayIndexOut ERROR : ");
+                    e.printStackTrace();
+
+                }
+
+                if (true) { //@001 ▼
+                    if (true) { //@002 ▼
+                        for (rxParsing rxParsing : arrayRxParsing) {
+                            rxParsing.gatherStart();
+                        }
+                    }
+
+                    for (int i = 0; i < rdLen; i++) {
+                        final byte rdByte = streamBuf[i];
+
+                        if (true) { //@002 ▼
+                            boolean clear = false;
+
+                            for (Serial422.rxParsing rxParsing : arrayRxParsing) {
+                                final int step = rxParsing.psStep;
+
+                                rxParsing.gathering(rdByte);
+
+                                if ((rxParsing.psStep == 0) && (step == 3)) {
+                                    clear = true;
+                                    break;
+                                } else if (rxParsing.psStep <= 2) break;
+                            }
+
+                            if (clear) {
+                                for (Serial422.rxParsing rxParsing : arrayRxParsing) {
+                                    rxParsing.gatherClear();
+                                }
+                            }
+                        } //@002 ▲
+
+                    }
+
+                    if (txQueueFlushReq.get()) {
+                        //flush imminently
+                        txQueue txq = txQueueGet();
+
+                        if (txq != null) {
+                            if (txq.sendCnt == 0) txQueueSenderFirst();
+
+                            txQueueFlush();
+                        }
+
+                        txQueueFlushReq.set(false);
+                    }
+
+                    arrayRxParsing[0].timeCheck();
+
+                    if ((txQueueSize.get() > 0) && (txTimeout > 0) && (txTimeout <= msTimeGet())) {
+                        txTimeout = 0;
+                        txQueue txq = txQueueGet();
+
+                        if (txq != null) {
+                            LogUtil.i(logTag
+                                    + String.format("TIMEOUT response ctrlCmd:%02Xh actCmd:%02Xh"
+                                    , txq.ctrlCmd, txq.actCmd));
+                        }
+
+                        txQueueSendRetry();
+                    }
+
+                    if ((txQueueSize.get() > 0) && (txTimeout == 0)) { //first send
+                        txQueueSenderFirst();
+                    }
+
+                    txQueueCleaner();
+                    vosCountChecker(null);
+                } //@001 ▲
+            }
+
+        }
+    }
+
+    private void txQueueCleaner() { //@001 ▼
+        txQueue queue = txQueueGet();
+
+        if (queue == null) return;
+        if (queue.sendCnt == 0) return;
+        if (queue.waitActCmds != null) return;
+
+        txQueueFlush();
+    } //@001 ▲
+
+    @SuppressLint("DefaultLocale") //@001
+    private boolean vosCountChecker(byte[] packet) { //@001 ▼
+        if (packet == null) {
+            if (vosCnt == 0) return true;
+
+            if ((vosTimeout > 0) && (vosTimeout <= msTimeGet()) && !vosRetry) {
+                vosTimeout = 0;
+                vosRetry = true;
+                LogUtil.i(logTag + "TIMEOUT voscope cnt packet, retry..");
+                T5HSystem.ScopeModeStatus(3/*retry*/, vosCnt);
+            }
+
+            return true;
+        }
+
+        final int actCmd = (int) packet[7] & 0xFF;
+
+        switch (actCmd) {
+            case ActionCommandT5H.FB_SCOPE_DATA_KV_MA: {
+                final int cnt = (((int) packet[8] & 0xFF) << 8) | ((int) packet[9] & 0xFF);
+
+                if (cnt == vosCnt) {
+                    if (vosRetry) {
+                        vosRetry = false;
+                    }
+
+                    if (vosCnt < (vosCntTarget - 1)) {
+                        vosCnt++;
+                        vosTimeout = msTimeGet() + 100/*per ms*/;
+                    } else vosTimeout = 0;
+
+                    return true;
+                }
+
+                if (!vosRetry) {
+                    vosRetry = true;
+                    LogUtil.i(logTag + String.format("NOT MATCH expect vosCnt %d != %d, retry.."
+                            , vosCnt, cnt));
+
+                    T5HSystem.ScopeModeStatus(3/*retry*/, vosCnt);
+                }
+
+                return false; //block parsing
+                //no break;
+            }
+
+            case ActionCommandT5H.FB_SCOPE_CONFIG: {
+                vosCntTarget = (((int) packet[9] & 0xFF) << 8) | ((int) packet[10] & 0xFF);
+                LogUtil.i(logTag + String.format("vosCntTarget %d", vosCntTarget));
+
+                if (!vosRetry) {
+                    vosCnt = 0;
+                }
+
+                break;
+            }
+
+            default:
+                return true; //no break;
+        }
+
+        return true;
+    } //@001 ▲
+
+    private void txQueueSenderFirst() { //@001 ▼
+        txQueue txq = txQueueGet();
+
+        if (txq == null) return;
+        if (txq.sendCnt > 0) return;
+
+        txQueueSend(txq);
+    } //@001 ▲
+
+    @SuppressLint("DefaultLocale") //@001
+    private static String packetLogView(byte[] dat, int len) { //@001 ▼
+        StringBuilder strPacket = new StringBuilder();
+        strPacket.append(String.format("len %d, ", len));
+
+        for (int n = 0; n < len; n++) {
+            strPacket.append(String.format("%02Xh ", dat[n]));
+        }
+
+        return strPacket.toString();
+    } //@001 ▲
+
+    private long msTimeGet() { //@001 ▼
+        return System.currentTimeMillis();
+    } //@001 ▲
+
+    @SuppressLint("DefaultLocale") //@001
+    private void txQueueSender(byte actCmd) { //@001 ▼
+        if (txQueueSize.get() == 0) return;
+
+        txQueue txq = txQueueGet();
+
+        if (txq == null) {
+            LogUtil.i(logTag + "INTERNAL:unexpected, txq == null??");
+            return;
+        }
+
+        final byte[] waitActCmd = txq.waitActCmds;
+
+        if (waitActCmd == null) return;
+
+        byte markCnt = 0;
+
+        for (int i = 0; i < waitActCmd.length; i++) {
+            if ((txq.markActCmds[i] == 0) && (actCmd == waitActCmd[i])) {
+                txq.markActCmds[i] = 1/*marking*/;
+            }
+
+            if (txq.markActCmds[i] != 0) markCnt++;
+        }
+
+        if (markCnt < waitActCmd.length) return;
+
+        //Log.i(logTag, String.format("actCmd %02Xh %02Xh", actCmd, waitActCmd[0]));
+
+        if (txq.retryCnt > 0) {
+            LogUtil.i(logTag + String.format("RECEIVED retry wait actCmd:%02Xh, sendCnt %d"
+                    , txq.actCmd, txq.sendCnt));
+        }
+
+
+        if (txTimeout > 0) txTimeout = 0;
+
+        txQueueFlush();
+    } //@001 ▲
+
+    @SuppressLint("DefaultLocale") //@001
+    private void txQueueSendRetry() { //@001 ▼
+        txQueue txq = txQueueGet();
+
+        if (txq == null) return;
+
+        if (txq.sendCnt == 0) return;
+
+        if (txq.retryCnt < 2/*retry count*/) { // first send 1 + retry 2 = 3 times
+            if (txQueueSend(txq)) {
+                txq.retryCnt++;
+                LogUtil.i(logTag + String.format("RETRY send actCmd:%02Xh, sendCnt %d"
+                        , txq.actCmd, txq.sendCnt));
+            } else {
+                LogUtil.i(logTag + "INTERNAL:unexpected, txQueueSend() == false??");
+            }
+        } else {
+            LogUtil.i(logTag + String.format("FAILED retry send actCmd:%02Xh, pos %d"
+                    , txq.actCmd, txQueuePopPos));
+
+						if(txq.listener != null){
+							txq.listener.callback(txq.id[2], txq.id[3], null, true, -1, -1);
+						}
+
+            txQueueFlush();
+            txq = txQueueGet();
+
+            if (txq == null) return;
+
+            txQueueSend(txq);
+        }
+    } //@001 ▲
+
+    private boolean txQueueSend(txQueue queue) { //@001 ▼
+			  //operationManager.markStatus(operationManager.bytesToString(queue.id));
+        SerialData(queue.len, queue.id, queue.szData);
+        queue.sendCnt++;
+
+        if (queue.waitActCmds != null) txTimeout = msTimeGet() + 500;
+        else{
+					txTimeout = 0;
+        }
+        return true;
+    } //@001 ▲
+
+}
