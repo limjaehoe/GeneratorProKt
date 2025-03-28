@@ -1,82 +1,36 @@
 package com.androidkotlin.generatorprokt.data.device
 
-import android.app.PendingIntent
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
-import android.hardware.usb.UsbDevice
-import android.hardware.usb.UsbDeviceConnection
-import android.hardware.usb.UsbManager
-import android.os.Build
 import android.os.SystemClock
-import com.hoho.android.usbserial.driver.UsbSerialDriver
-import com.hoho.android.usbserial.driver.UsbSerialPort
-import com.hoho.android.usbserial.driver.UsbSerialProber
-import dagger.hilt.android.qualifiers.ApplicationContext
+import android_serialport_api.SerialPort
+import android_serialport_api.SerialPortFinder
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import java.io.File
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * USB 시리얼 통신을 위한 디바이스 클래스
- */
 @Singleton
 class Serial422Device @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "Serial422Device"
         private const val SERIAL_BAUDRATE = 115200
-        private const val ACTION_USB_PERMISSION = "com.androidkotlin.generatorprokt.USB_PERMISSION"
-
-        // 필요에 따라 VID/PID 설정 (특정 장치를 찾기 위한 값)
-        private const val USB_VENDOR_ID = 0x2542   // 예시 값, 실제 장치에 맞게 변경
-        private const val USB_PRODUCT_ID = 0x1020  // 예시 값, 실제 장치에 맞게 변경
+        private const val SERIAL_PORT_NAME = "ttyS3" // RS-485 포트
     }
 
-    private val usbManager: UsbManager by lazy {
-        context.getSystemService(Context.USB_SERVICE) as UsbManager
-    }
-
-    private var usbDevice: UsbDevice? = null
-    private var usbConnection: UsbDeviceConnection? = null
-    private var usbSerialPort: UsbSerialPort? = null
+    private var mSerialPort: SerialPort? = null
+    private var mInputStream: InputStream? = null
+    private var mOutputStream: OutputStream? = null
     private var readThread: ReadThread? = null
     private var isConnected = false
 
     // 데이터 수신 콜백
     var onDataReceived: ((ByteArray, Int) -> Unit)? = null
-
-    // USB 권한 요청에 대한 브로드캐스트 리시버
-    private val usbPermissionReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            if (ACTION_USB_PERMISSION == intent.action) {
-                synchronized(this) {
-                    val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-                    }
-
-                    if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                        device?.let {
-                            // 권한이 부여되면 연결 진행
-                            Timber.d("USB permission granted for device ${it.deviceName}")
-                            connectToDevice(it)
-                        }
-                    } else {
-                        Timber.e("USB permission denied for device ${device?.deviceName}")
-                    }
-                }
-            }
-        }
-    }
 
     /**
      * 시리얼 포트 연결
@@ -84,173 +38,86 @@ class Serial422Device @Inject constructor(
     suspend fun connect(): Result<Unit> = withContext(ioDispatcher) {
         try {
             if (isConnected) {
-                Timber.d("이미 연결되어 있습니다.")
                 return@withContext Result.success(Unit)
             }
 
-            // USB 권한 브로드캐스트 리시버 등록
-            val filter = IntentFilter(ACTION_USB_PERMISSION)
-            // Android API 수준에 따라 적절한 방식으로 Receiver 등록
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.registerReceiver(
-                    usbPermissionReceiver,
-                    filter,
-                    Context.RECEIVER_NOT_EXPORTED
-                )
+            Timber.d("시리얼 포트 연결 시도 중...")
+            openSerialPort(SERIAL_PORT_NAME)
+
+            if (mSerialPort != null) {
+                isConnected = true
+                startReadThread()
+                Timber.d("시리얼 포트 연결 성공")
+                return@withContext Result.success(Unit)
             } else {
-                context.registerReceiver(usbPermissionReceiver, filter)
+                Timber.e("시리얼 포트 연결 실패: 포트를 열 수 없음")
+                return@withContext Result.failure(Exception("Failed to open serial port"))
             }
-
-            // 연결할 USB 장치 찾기
-            val usbDevices = usbManager.deviceList
-
-            Timber.d("USB 장치 탐색 시작")
-            Timber.d("발견된 장치 수: ${usbDevices.size}")
-
-            // 모든 USB 장치 정보 로깅
-            if (usbDevices.isEmpty()) {
-                Timber.e("연결된 USB 장치가 없습니다! USB 장치가 연결되어 있는지 확인하세요.")
-            } else {
-                usbDevices.forEach { (name, device) ->
-                    Timber.d("USB 장치: $name, VID: 0x${device.vendorId.toString(16)}, PID: 0x${device.productId.toString(16)}, 인터페이스 수: ${device.interfaceCount}")
-
-                    // 각 인터페이스 정보 출력
-                    for (i in 0 until device.interfaceCount) {
-                        val intf = device.getInterface(i)
-                        Timber.d("  인터페이스 #$i: 엔드포인트 수: ${intf.endpointCount}, 클래스: ${intf.interfaceClass}")
-                    }
-                }
-            }
-
-            if (usbDevices.isEmpty()) {
-                return@withContext Result.failure(Exception("USB 장치가 감지되지 않았습니다. 장치가 연결되어 있는지 확인하세요."))
-            }
-
-            // 시리얼 장치 찾기 - 모든 가능한 드라이버 찾기
-            val availableDrivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager)
-            Timber.d("시리얼 드라이버 찾기: ${availableDrivers.size}개 찾음")
-
-            if (availableDrivers.isEmpty()) {
-                return@withContext Result.failure(Exception("사용 가능한 USB 시리얼 장치를 찾을 수 없습니다."))
-            }
-
-            // 사용 가능한 모든 드라이버 정보 로깅
-            availableDrivers.forEachIndexed { index, driver ->
-                Timber.d("시리얼 드라이버 #$index: 장치=${driver.device.deviceName}, " +
-                        "VID=0x${driver.device.vendorId.toString(16)}, " +
-                        "PID=0x${driver.device.productId.toString(16)}, " +
-                        "포트 수=${driver.ports.size}")
-            }
-
-            // 첫 번째 사용 가능한 드라이버 선택
-            val driver = availableDrivers[0]
-            usbDevice = driver.device
-            Timber.d("선택된 드라이버: 장치=${driver.device.deviceName}")
-
-            usbDevice?.let { device ->
-                if (usbManager.hasPermission(device)) {
-                    // 이미 권한이 있는 경우 바로 연결 시도
-                    Timber.d("이미 장치에 대한 권한이 있습니다. 연결을 시도합니다.")
-                    val connected = connectToDevice(device)
-                    if (connected) {
-                        Timber.d("장치에 성공적으로 연결되었습니다.")
-                        return@withContext Result.success(Unit)
-                    } else {
-                        Timber.e("장치 연결에 실패했습니다.")
-                        return@withContext Result.failure(Exception("장치 연결에 실패했습니다."))
-                    }
-                } else {
-                    // 권한 요청
-                    Timber.d("장치에 대한 권한이 없습니다. 권한을 요청합니다.")
-                    val permissionIntent = PendingIntent.getBroadcast(
-                        context, 0, Intent(ACTION_USB_PERMISSION),
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-                            PendingIntent.FLAG_IMMUTABLE
-                        else 0
-                    )
-                    usbManager.requestPermission(device, permissionIntent)
-
-                    // 주의: 권한 요청은 비동기적으로 처리되므로 여기서는 대기 상태 반환
-                    // 실제 연결은 usbPermissionReceiver에서 처리됨
-                    Timber.d("권한 요청이 전송되었습니다. 결과를 기다립니다.")
-                    return@withContext Result.success(Unit)
-                }
-            } ?: run {
-                Timber.e("USB 장치를 선택할 수 없습니다.")
-                return@withContext Result.failure(Exception("USB 장치를 선택할 수 없습니다."))
-            }
-
         } catch (e: Exception) {
-            Timber.e(e, "USB 시리얼 포트 연결 중 오류 발생")
+            Timber.e(e, "시리얼 포트 연결 중 오류 발생")
             return@withContext Result.failure(e)
         }
     }
 
     /**
-     * USB 장치에 연결
+     * 시리얼 포트 열기
      */
-    private fun connectToDevice(device: UsbDevice): Boolean {
-        try {
-            Timber.d("장치 ${device.deviceName}에 연결 시도 중...")
+    private fun openSerialPort(name: String) {
+        val serialPortFinder = SerialPortFinder()
+        val devices = serialPortFinder.allDevices
+        val devicesPath = serialPortFinder.allDevicesPath
 
-            // 드라이버 찾기
-            val driver = UsbSerialProber.getDefaultProber().probeDevice(device)
-            if (driver == null) {
-                Timber.e("장치 ${device.deviceName}에 대한 드라이버를 찾을 수 없습니다.")
-                return false
-            }
+        Timber.d("사용 가능한 시리얼 포트 검색 중...")
+        Timber.d("발견된 장치 수: ${devices.size}")
 
-            Timber.d("장치 ${device.deviceName}에 대한 드라이버를 찾았습니다. 포트 수: ${driver.ports.size}")
+        for (i in devices.indices) {
+            val device = devices[i]
+            val path = devicesPath[i]
+            Timber.d("발견된 장치[$i]: $device, 경로: $path")
 
-            // 연결 열기
-            val connection = usbManager.openDevice(device)
-            if (connection == null) {
-                Timber.e("장치 ${device.deviceName}에 대한 연결을 열 수 없습니다.")
-                return false
-            }
-
-            Timber.d("장치 ${device.deviceName}에 대한 연결을 열었습니다.")
-
-            // 첫 번째 포트 사용
-            if (driver.ports.isEmpty()) {
-                Timber.e("장치 ${device.deviceName}에 사용 가능한 포트가 없습니다.")
-                return false
-            }
-
-            val port = driver.ports[0]
-            try {
-                Timber.d("포트 열기 시도 중...")
-                port.open(connection)
-                Timber.d("포트를 성공적으로 열었습니다.")
-
-                Timber.d("포트 파라미터 설정 중: $SERIAL_BAUDRATE bps, 8N1")
-                port.setParameters(SERIAL_BAUDRATE, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
-                Timber.d("포트 파라미터가 성공적으로 설정되었습니다.")
-            } catch (e: Exception) {
-                Timber.e(e, "포트 열기 또는 파라미터 설정 중 오류 발생")
+            if (device.contains(name)) {
                 try {
-                    port.close()
-                } catch (closeException: Exception) {
-                    Timber.e(closeException, "포트 닫기 중 오류 발생")
+                    // 시리얼 포트 파일에 권한 설정
+                    setPermissions(path)
+
+                    // 권한 설정 후 시리얼 포트 열기 시도
+                    mSerialPort = SerialPort(File(path), SERIAL_BAUDRATE, 0)
+                    Timber.d("시리얼 포트 열림: $path")
+                    break
+                } catch (e: IOException) {
+                    Timber.e(e, "시리얼 포트 열기 실패: $path")
                 }
-                return false
             }
+        }
 
-            // 필드 저장
-            usbDevice = device
-            usbConnection = connection
-            usbSerialPort = port
-            isConnected = true
+        // 적합한 포트를 찾지 못한 경우 다른 일반적인 경로 시도
+        if (mSerialPort == null) {
+            val commonPaths = arrayOf(
+                "/dev/ttyS3", "/dev/ttyS2", "/dev/ttyS1", "/dev/ttyS0",
+                "/dev/ttyS4", "/dev/ttyUSB0", "/dev/ttyACM0"
+            )
 
-            // 읽기 스레드 시작
-            Timber.d("읽기 스레드 시작 중...")
-            startReadThread()
-            Timber.d("장치 ${device.deviceName}에 성공적으로 연결되었습니다.")
+            for (path in commonPaths) {
+                try {
+                    Timber.d("일반 경로 시도: $path")
+                    setPermissions(path)
+                    mSerialPort = SerialPort(File(path), SERIAL_BAUDRATE, 0)
+                    if (mSerialPort != null) {
+                        Timber.d("시리얼 포트 열림(공통 경로): $path")
+                        break
+                    }
+                } catch (e: Exception) {
+                    Timber.e(e, "시리얼 포트 열기 실패(공통 경로): $path")
+                }
+            }
+        }
 
-            return true
-        } catch (e: Exception) {
-            Timber.e(e, "장치 ${device.deviceName}에 연결 중 예외 발생")
-            return false
+        if (mSerialPort != null) {
+            mInputStream = mSerialPort?.inputStream
+            mOutputStream = mSerialPort?.outputStream
+            Timber.d("입출력 스트림 생성 완료")
+        } else {
+            Timber.e("적합한 시리얼 포트를 찾을 수 없음")
         }
     }
 
@@ -259,15 +126,18 @@ class Serial422Device @Inject constructor(
      */
     suspend fun sendData(data: ByteArray): Result<Unit> = withContext(ioDispatcher) {
         try {
-            if (!isConnected || usbSerialPort == null) {
-                return@withContext Result.failure(Exception("USB serial port not connected"))
+            if (!isConnected || mOutputStream == null) {
+                return@withContext Result.failure(Exception("Serial port not connected"))
             }
 
-            usbSerialPort?.write(data, 5000) // 5초 타임아웃
-            Result.success(Unit)
+            mOutputStream?.write(data)
+            mOutputStream?.flush()
+            Timber.d("데이터 전송 완료: ${bytesToHexString(data)}")
+
+            return@withContext Result.success(Unit)
         } catch (e: Exception) {
-            Timber.e(e, "Error sending data to USB serial port")
-            Result.failure(e)
+            Timber.e(e, "데이터 전송 중 오류 발생")
+            return@withContext Result.failure(e)
         }
     }
 
@@ -279,26 +149,20 @@ class Serial422Device @Inject constructor(
             readThread?.interrupt()
             readThread = null
 
-            usbSerialPort?.close()
-            usbSerialPort = null
+            mInputStream?.close()
+            mOutputStream?.close()
+            mSerialPort?.closePort() // closePort() 메서드 호출
 
-            usbConnection?.close()
-            usbConnection = null
-
-            usbDevice = null
+            mInputStream = null
+            mOutputStream = null
+            mSerialPort = null
             isConnected = false
 
-            try {
-                context.unregisterReceiver(usbPermissionReceiver)
-            } catch (e: IllegalArgumentException) {
-                // 리시버가 등록되지 않은 경우 무시
-            }
-
-            Timber.d("USB serial port disconnected")
-            Result.success(Unit)
+            Timber.d("시리얼 포트 연결 종료")
+            return@withContext Result.success(Unit)
         } catch (e: Exception) {
-            Timber.e(e, "Error disconnecting USB serial port")
-            Result.failure(e)
+            Timber.e(e, "시리얼 포트 연결 종료 중 오류 발생")
+            return@withContext Result.failure(e)
         }
     }
 
@@ -324,17 +188,41 @@ class Serial422Device @Inject constructor(
 
             while (!isInterrupted && isConnected) {
                 try {
-                    val readBytes = usbSerialPort?.read(buffer, 100) ?: 0
+                    val readBytes = mInputStream?.read(buffer) ?: 0
                     if (readBytes > 0) {
+                        Timber.d("데이터 수신: ${readBytes}바이트")
                         onDataReceived?.invoke(buffer, readBytes)
                     }
                     SystemClock.sleep(10) // CPU 부하 감소
                 } catch (e: IOException) {
-                    Timber.e(e, "Error reading from USB serial port")
+                    Timber.e(e, "데이터 읽기 중 오류 발생")
                     isConnected = false
                     break
                 }
             }
+        }
+    }
+
+    /**
+     * 바이트 배열을 16진수 문자열로 변환
+     */
+    private fun bytesToHexString(bytes: ByteArray): String {
+        return bytes.joinToString(" ") { byte ->
+            String.format("%02X", byte)
+        }
+    }
+
+    private fun setPermissions(path: String) {
+        try {
+            val process = Runtime.getRuntime().exec("su")
+            val outputStream = process.outputStream
+            val cmd = "chmod 666 $path\nexit\n"
+            outputStream.write(cmd.toByteArray())
+            outputStream.flush()
+            process.waitFor()
+            Timber.d("권한 설정 시도: $path")
+        } catch (e: Exception) {
+            Timber.e(e, "권한 설정 실패: $path")
         }
     }
 }
