@@ -433,4 +433,81 @@ class Serial422RepositoryImpl @Inject constructor(
             return Result.failure(e)
         }
     }
+
+
+
+    /**
+     * Ready 상태 전환 명령 전송 (1: 켜기, 0: 끄기)
+     */
+    suspend fun sendReadyCommand(on: Boolean): Result<SerialResponse> {
+        try {
+            Timber.d("Ready 명령 전송 중: ${if (on) "ON" else "OFF"}")
+
+            val value = if (on) 1 else 0
+            val data = SerialPacketHandler.createUCharData(value)
+
+            val packet = SerialPacket(
+                controlCommand = SerialCommand.Control.CommStatusInfo,
+                actionCommand = SerialCommand.Action.ReadySw,
+                data = data,
+                targetId = SerialPacket.TARGET_MAIN,
+                sourceId = SerialPacket.SOURCE_CONSOLE
+            )
+
+            return sendPacket(packet)
+        } catch (e: Exception) {
+            Timber.e(e, "Ready 명령 전송 중 예외 발생")
+            return Result.failure(e)
+        }
+    }
+
+    /**
+     * Expose 상태 전환 명령 전송 (1: 켜기, 0: 끄기)
+     */
+    suspend fun sendExposeCommand(on: Boolean): Result<SerialResponse> {
+        try {
+            Timber.d("Expose 명령 전송 중: ${if (on) "ON" else "OFF"}")
+
+            val value = if (on) 1 else 0
+            val data = SerialPacketHandler.createUCharData(value)
+
+            val packet = SerialPacket(
+                controlCommand = SerialCommand.Control.CommStatusInfo,
+                actionCommand = SerialCommand.Action.ExposureSw,
+                data = data,
+                targetId = SerialPacket.TARGET_MAIN,
+                sourceId = SerialPacket.SOURCE_CONSOLE
+            )
+
+            return sendPacket(packet)
+        } catch (e: Exception) {
+            Timber.e(e, "Expose 명령 전송 중 예외 발생")
+            return Result.failure(e)
+        }
+    }
+
+    /**
+     * 시스템 상태 변경 명령 전송
+     * @param status 원하는 시스템 상태 코드 (예: 4 = MAIN_MODE_EXPOSURE_READY)
+     */
+    suspend fun sendSystemStatus(status: Int): Result<SerialResponse> {
+        try {
+            Timber.d("시스템 상태 변경 명령 전송: $status")
+
+            val data = SerialPacketHandler.createUCharData(status)
+
+            val packet = SerialPacket(
+                controlCommand = SerialCommand.Control.CommStatusInfo,
+                actionCommand = SerialCommand.Action.SystemStatus,
+                data = data,
+                targetId = SerialPacket.TARGET_MAIN,
+                sourceId = SerialPacket.SOURCE_CONSOLE
+            )
+
+            return sendPacket(packet)
+        } catch (e: Exception) {
+            Timber.e(e, "시스템 상태 변경 명령 전송 중 예외 발생")
+            return Result.failure(e)
+        }
+    }
 }

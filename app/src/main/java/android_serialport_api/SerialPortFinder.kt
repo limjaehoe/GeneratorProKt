@@ -1,4 +1,3 @@
-// app/src/main/java/android_serialport_api/SerialPortFinder.kt
 package android_serialport_api
 
 import android.util.Log
@@ -73,10 +72,40 @@ class SerialPortFinder {
     inner class Driver(val name: String, val root: String) {
         val devices = Vector<Device>()
 
+//        fun probeDevices() {
+//            val dev = File("/dev")
+//            val files = dev.listFiles { _, name -> name.startsWith(root.substring("/dev/".length)) }
+//
+//            // 나머지 코드...
+//            if (files != null) {
+//                for (file in files) {
+//                    Log.d(TAG, "Found new device: ${file.name}")
+//                    devices.add(Device(file.name, file.absolutePath))
+//                }
+//            }
+//
+//        }
+
+
         fun probeDevices() {
             val dev = File("/dev")
-            val files = dev.listFiles { _, name -> name.startsWith(root.substring("/dev/".length)) }
 
+            // 안전 확인 추가
+            if (root.length <= "/dev/".length) {
+                Log.e(TAG, "Invalid root path: $root")
+                return
+            }
+
+            val prefix = try {
+                root.substring("/dev/".length)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error extracting prefix from $root", e)
+                return
+            }
+
+            val files = dev.listFiles { _, name -> name.startsWith(prefix) }
+
+            // 나머지 코드...
             if (files != null) {
                 for (file in files) {
                     Log.d(TAG, "Found new device: ${file.name}")

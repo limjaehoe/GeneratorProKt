@@ -1,4 +1,3 @@
-// app/src/main/java/android_serialport_api/SerialPort.kt
 package android_serialport_api
 
 import android.util.Log
@@ -17,7 +16,9 @@ class SerialPort(device: File, baudrate: Int, flags: Int) {
         // 네이티브 라이브러리 로드
         init {
             try {
+                Log.e(TAG, "시리얼 포트 라이브러리 로드 시도")
                 System.loadLibrary("serial_port")
+                Log.e(TAG, "시리얼 포트 라이브러리 로드 성공")
             } catch (e: UnsatisfiedLinkError) {
                 Log.e(TAG, "네이티브 라이브러리 로드 실패", e)
             }

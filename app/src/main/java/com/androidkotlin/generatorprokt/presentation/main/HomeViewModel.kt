@@ -2,7 +2,9 @@ package com.androidkotlin.generatorprokt.presentation.main
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.androidkotlin.generatorprokt.data.device.SerialPacketHandler
 import com.androidkotlin.generatorprokt.domain.model.SerialCommand
+import com.androidkotlin.generatorprokt.domain.model.SerialPacket
 import com.androidkotlin.generatorprokt.domain.model.SerialResponse
 import com.androidkotlin.generatorprokt.domain.usecase.ConnectSerialUseCase
 import com.androidkotlin.generatorprokt.domain.usecase.ReceiveSerialDataUseCase
@@ -333,6 +335,7 @@ class HomeViewModel @Inject constructor(
             SerialCommand.Action.HeartBeat.value -> {
                 _deviceStatus.value = DeviceStatus.Connected
                 _uiState.value = GeneratorUiState.Success("하트비트 수신됨")
+
             }
             SerialCommand.Action.ErrorCode.value -> {
                 if (response.data != null && response.data.size >= 2) {
@@ -499,4 +502,5 @@ class HomeViewModel @Inject constructor(
         }
         return connected
     }
+
 }

@@ -9,8 +9,11 @@ import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
 import android.text.method.ScrollingMovementMethod
+import android.util.Log
 import android.widget.Toast
+import android_serialport_api.SerialPortFinder
 import androidx.activity.viewModels
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.androidkotlin.generatorprokt.databinding.ActivityHomeBinding
@@ -35,6 +38,30 @@ class HomeActivity : AppCompatActivity() {
 
         setupUI()
         observeViewModel()
+
+//        try {
+//            Toast.makeText(this, "라이브러리 로드 시도", Toast.LENGTH_SHORT).show()
+//            System.loadLibrary("serial_port")
+//            Toast.makeText(this, "라이브러리 로드 성공", Toast.LENGTH_SHORT).show()
+//        } catch (e: Exception) {
+//            Toast.makeText(this, "라이브러리 로드 실패: ${e.message}", Toast.LENGTH_LONG).show()
+//        }
+
+        val portFinder = SerialPortFinder()
+        val devices = portFinder.allDevices
+        val paths = portFinder.allDevicesPath
+
+        Log.e("SERIAL_TEST", "발견된 시리얼 장치 수: ${devices.size}")
+        for (i in devices.indices) {
+            Log.e("SERIAL_TEST", "장치[$i]: ${devices[i]}, 경로: ${paths[i]}")
+            // 또는 Toast로도 확인
+            Toast.makeText(this, "장치[$i]: ${devices[i]}, 경로: ${paths[i]}", Toast.LENGTH_SHORT).show()
+        }
+
+        // ttyS3 포트가 있는지 특별히 확인
+        val hasTtyS3 = paths.any { it.contains("ttyS3") }
+        Log.e("SERIAL_TEST", "ttyS3 포트 발견됨: $hasTtyS3")
+        Toast.makeText(this, "ttyS3 포트 발견됨: $hasTtyS3", Toast.LENGTH_LONG).show()
     }
 
     // USB 권한 요청에 필요한 인텐트 필터 설정
@@ -184,6 +211,7 @@ class HomeActivity : AppCompatActivity() {
         binding.btnClearLog.setOnClickListener {
             binding.tvResponseData.text = ""
         }
+
     }
 
     private fun observeViewModel() {
