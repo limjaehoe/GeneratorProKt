@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 이 파일은 앱이 자동으로 실행되는 USB 장치를 지정합니다 -->
+<!-- 특정 VID/PID가 있는 경우 아래 예시를 사용하세요 -->
+<resources>
+    <!--
+    <usb-device vendor-id="9025" product-id="32845" />
+    <usb-device vendor-id="1027" product-id="24577" />
+    <usb-device vendor-id="9025" />
+    -->
+
+    <!-- 모든 USB Serial 장치 지원 (예시) -->
+    <!-- FTDI 장치 -->
+    <usb-device vendor-id="1027" />
+    <!-- Silabs CP210x 장치 -->
+    <usb-device vendor-id="4292" />
+    <!-- Prolific PL2303 장치 -->
+    <usb-device vendor-id="1659" />
+    <!-- Qinheng CH34x 장치 -->
+    <usb-device vendor-id="6790" />
+    <!-- 발전기와 호환되는 장치 (실제 VID/PID로 대체 필요) -->
+    <usb-device vendor-id="9025" product-id="4133" />
+</resources>

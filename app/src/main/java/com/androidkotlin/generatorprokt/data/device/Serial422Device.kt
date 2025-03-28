@@ -84,6 +84,7 @@ class Serial422Device @Inject constructor(
     suspend fun connect(): Result<Unit> = withContext(ioDispatcher) {
         try {
             if (isConnected) {
+                Timber.d("이미 연결되어 있습니다.")
                 return@withContext Result.success(Unit)
             }
 
@@ -103,14 +104,12 @@ class Serial422Device @Inject constructor(
             // 연결할 USB 장치 찾기
             val usbDevices = usbManager.deviceList
 
-            // 더 자세한 로깅
-            Timber.d("USB 장치 탐색 중...")
-            Timber.d("장치 목록 크기: ${usbDevices.size}")
+            Timber.d("USB 장치 탐색 시작")
+            Timber.d("발견된 장치 수: ${usbDevices.size}")
 
-            // 더 자세한 로깅
-            Timber.d("모든 USB 장치 나열:")
+            // 모든 USB 장치 정보 로깅
             if (usbDevices.isEmpty()) {
-                Timber.e("연결된 USB 장치가 없습니다!")
+                Timber.e("연결된 USB 장치가 없습니다! USB 장치가 연결되어 있는지 확인하세요.")
             } else {
                 usbDevices.forEach { (name, device) ->
                     Timber.d("USB 장치: $name, VID: 0x${device.vendorId.toString(16)}, PID: 0x${device.productId.toString(16)}, 인터페이스 수: ${device.interfaceCount}")
@@ -123,38 +122,46 @@ class Serial422Device @Inject constructor(
                 }
             }
 
-
             if (usbDevices.isEmpty()) {
-                // 장치가 없을 때 더 명확한 오류 메시지
-                Timber.e("USB 장치가 감지되지 않았습니다. 장치가 연결되어 있는지 확인하세요.")
-                return@withContext Result.failure(Exception("No USB devices found. Please check if the device is connected."))
+                return@withContext Result.failure(Exception("USB 장치가 감지되지 않았습니다. 장치가 연결되어 있는지 확인하세요."))
             }
 
-            // 장치 목록 로그
-            usbDevices.forEach { (name, device) ->
-                Timber.d("발견된 USB 장치: $name, VID: 0x${device.vendorId.toString(16)}, PID: 0x${device.productId.toString(16)}")
-            }
-
-            // 특정 VID/PID로 장치 찾기 또는 첫 번째 사용 가능한 시리얼 장치 찾기
+            // 시리얼 장치 찾기 - 모든 가능한 드라이버 찾기
             val availableDrivers = UsbSerialProber.getDefaultProber().findAllDrivers(usbManager)
+            Timber.d("시리얼 드라이버 찾기: ${availableDrivers.size}개 찾음")
 
             if (availableDrivers.isEmpty()) {
-                return@withContext Result.failure(Exception("No USB serial devices found"))
+                return@withContext Result.failure(Exception("사용 가능한 USB 시리얼 장치를 찾을 수 없습니다."))
             }
 
-            Timber.d("Found ${availableDrivers.size} USB serial devices")
+            // 사용 가능한 모든 드라이버 정보 로깅
+            availableDrivers.forEachIndexed { index, driver ->
+                Timber.d("시리얼 드라이버 #$index: 장치=${driver.device.deviceName}, " +
+                        "VID=0x${driver.device.vendorId.toString(16)}, " +
+                        "PID=0x${driver.device.productId.toString(16)}, " +
+                        "포트 수=${driver.ports.size}")
+            }
 
-            // 첫 번째 사용 가능한 드라이버와 첫 번째 포트를 사용
+            // 첫 번째 사용 가능한 드라이버 선택
             val driver = availableDrivers[0]
             usbDevice = driver.device
+            Timber.d("선택된 드라이버: 장치=${driver.device.deviceName}")
 
             usbDevice?.let { device ->
                 if (usbManager.hasPermission(device)) {
-                    // 이미 권한이 있는 경우 바로 연결
-                    connectToDevice(device)
-                    Result.success(Unit)
+                    // 이미 권한이 있는 경우 바로 연결 시도
+                    Timber.d("이미 장치에 대한 권한이 있습니다. 연결을 시도합니다.")
+                    val connected = connectToDevice(device)
+                    if (connected) {
+                        Timber.d("장치에 성공적으로 연결되었습니다.")
+                        return@withContext Result.success(Unit)
+                    } else {
+                        Timber.e("장치 연결에 실패했습니다.")
+                        return@withContext Result.failure(Exception("장치 연결에 실패했습니다."))
+                    }
                 } else {
                     // 권한 요청
+                    Timber.d("장치에 대한 권한이 없습니다. 권한을 요청합니다.")
                     val permissionIntent = PendingIntent.getBroadcast(
                         context, 0, Intent(ACTION_USB_PERMISSION),
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
@@ -163,14 +170,19 @@ class Serial422Device @Inject constructor(
                     )
                     usbManager.requestPermission(device, permissionIntent)
 
-                    // 권한 요청은 비동기적으로 처리되므로 대기 상태 반환
-                    Result.success(Unit)
+                    // 주의: 권한 요청은 비동기적으로 처리되므로 여기서는 대기 상태 반환
+                    // 실제 연결은 usbPermissionReceiver에서 처리됨
+                    Timber.d("권한 요청이 전송되었습니다. 결과를 기다립니다.")
+                    return@withContext Result.success(Unit)
                 }
-            } ?: Result.failure(Exception("Failed to connect to USB device"))
+            } ?: run {
+                Timber.e("USB 장치를 선택할 수 없습니다.")
+                return@withContext Result.failure(Exception("USB 장치를 선택할 수 없습니다."))
+            }
 
         } catch (e: Exception) {
-            Timber.e(e, "Error connecting to USB serial port")
-            Result.failure(e)
+            Timber.e(e, "USB 시리얼 포트 연결 중 오류 발생")
+            return@withContext Result.failure(e)
         }
     }
 
@@ -179,18 +191,50 @@ class Serial422Device @Inject constructor(
      */
     private fun connectToDevice(device: UsbDevice): Boolean {
         try {
+            Timber.d("장치 ${device.deviceName}에 연결 시도 중...")
+
             // 드라이버 찾기
             val driver = UsbSerialProber.getDefaultProber().probeDevice(device)
-                ?: return false
+            if (driver == null) {
+                Timber.e("장치 ${device.deviceName}에 대한 드라이버를 찾을 수 없습니다.")
+                return false
+            }
+
+            Timber.d("장치 ${device.deviceName}에 대한 드라이버를 찾았습니다. 포트 수: ${driver.ports.size}")
 
             // 연결 열기
             val connection = usbManager.openDevice(device)
-                ?: return false
+            if (connection == null) {
+                Timber.e("장치 ${device.deviceName}에 대한 연결을 열 수 없습니다.")
+                return false
+            }
+
+            Timber.d("장치 ${device.deviceName}에 대한 연결을 열었습니다.")
 
             // 첫 번째 포트 사용
+            if (driver.ports.isEmpty()) {
+                Timber.e("장치 ${device.deviceName}에 사용 가능한 포트가 없습니다.")
+                return false
+            }
+
             val port = driver.ports[0]
-            port.open(connection)
-            port.setParameters(SERIAL_BAUDRATE, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+            try {
+                Timber.d("포트 열기 시도 중...")
+                port.open(connection)
+                Timber.d("포트를 성공적으로 열었습니다.")
+
+                Timber.d("포트 파라미터 설정 중: $SERIAL_BAUDRATE bps, 8N1")
+                port.setParameters(SERIAL_BAUDRATE, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE)
+                Timber.d("포트 파라미터가 성공적으로 설정되었습니다.")
+            } catch (e: Exception) {
+                Timber.e(e, "포트 열기 또는 파라미터 설정 중 오류 발생")
+                try {
+                    port.close()
+                } catch (closeException: Exception) {
+                    Timber.e(closeException, "포트 닫기 중 오류 발생")
+                }
+                return false
+            }
 
             // 필드 저장
             usbDevice = device
@@ -199,12 +243,13 @@ class Serial422Device @Inject constructor(
             isConnected = true
 
             // 읽기 스레드 시작
+            Timber.d("읽기 스레드 시작 중...")
             startReadThread()
-            Timber.d("Connected to USB device ${device.deviceName}")
+            Timber.d("장치 ${device.deviceName}에 성공적으로 연결되었습니다.")
 
             return true
         } catch (e: Exception) {
-            Timber.e(e, "Error connecting to device ${device.deviceName}")
+            Timber.e(e, "장치 ${device.deviceName}에 연결 중 예외 발생")
             return false
         }
     }

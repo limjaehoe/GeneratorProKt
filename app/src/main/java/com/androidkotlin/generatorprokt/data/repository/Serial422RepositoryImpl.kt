@@ -1,6 +1,7 @@
 package com.androidkotlin.generatorprokt.data.repository
 
 import com.androidkotlin.generatorprokt.data.device.Serial422Device
+import com.androidkotlin.generatorprokt.data.device.SerialPacketHandler
 import com.androidkotlin.generatorprokt.domain.model.SerialCommand
 import com.androidkotlin.generatorprokt.domain.model.SerialPacket
 import com.androidkotlin.generatorprokt.domain.model.SerialResponse
@@ -11,7 +12,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 import timber.log.Timber
-import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -23,133 +23,414 @@ class Serial422RepositoryImpl @Inject constructor(
 
     // 응답 처리를 위한 콜백 플로우
     private val responseFlow = callbackFlow {
+        Timber.d("응답 처리 콜백 플로우 초기화")
+
         serial422Device.onDataReceived = { buffer, size ->
             try {
-                val response = parseResponse(buffer, size)
+                Timber.d("${size}바이트 데이터 수신됨")
+                val response = SerialPacketHandler.parseResponse(buffer, size)
+
+                when (response) {
+                    is SerialResponse.Success -> {
+                        // 응답 데이터 해석
+                        val interpreted = SerialPacketHandler.interpretResponse(response)
+                        if (interpreted != null) {
+                            Timber.d("응답 해석 결과: $interpreted")
+                        }
+                    }
+                    is SerialResponse.Error -> {
+                        Timber.e("응답 오류: ${response.exception.message}")
+                    }
+                    is SerialResponse.Timeout -> {
+                        Timber.w("응답 시간 초과")
+                    }
+                }
+
                 trySend(response)
             } catch (e: Exception) {
-                Timber.e(e, "Error parsing response")
+                Timber.e(e, "응답 파싱 중 오류 발생")
                 trySend(SerialResponse.Error(e))
             }
         }
 
         awaitClose {
+            Timber.d("응답 처리 콜백 플로우 종료")
             serial422Device.onDataReceived = null
         }
     }
 
     override suspend fun connect(): Result<Unit> {
-        return serial422Device.connect()
+        Timber.d("connect() 호출됨")
+        return try {
+            val result = serial422Device.connect()
+
+            if (result.isSuccess) {
+                Timber.d("장치 연결 성공")
+
+                // 연결 성공 후 초기화 요청 전송
+                sendInitialRequest()
+            } else {
+                val exception = result.exceptionOrNull() ?: Exception("알 수 없는 오류")
+                Timber.e(exception, "장치 연결 실패")
+            }
+
+            result
+        } catch (e: Exception) {
+            Timber.e(e, "장치 연결 중 예외 발생")
+            Result.failure(e)
+        }
     }
 
     override suspend fun disconnect() {
-        serial422Device.disconnect()
+        Timber.d("disconnect() 호출됨")
+        try {
+            val result = serial422Device.disconnect()
+
+            if (result.isSuccess) {
+                Timber.d("장치 연결 해제 성공")
+            } else {
+                val exception = result.exceptionOrNull() ?: Exception("알 수 없는 오류")
+                Timber.e(exception, "장치 연결 해제 실패")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "장치 연결 해제 중 예외 발생")
+        }
     }
 
     override suspend fun sendPacket(packet: SerialPacket): Result<SerialResponse> = withContext(ioDispatcher) {
+        Timber.d("sendPacket() 호출됨 - Control: ${packet.controlCommand.javaClass.simpleName}, Action: ${packet.actionCommand.javaClass.simpleName}")
+
         try {
-            val serializedPacket = serializePacket(packet)
+            if (!isConnected()) {
+                Timber.e("장치가 연결되어 있지 않아 패킷을 보낼 수 없습니다")
+                return@withContext Result.failure(Exception("장치가 연결되어 있지 않습니다"))
+            }
+
+            val serializedPacket = SerialPacketHandler.serializePacket(packet)
+            Timber.d("패킷 직렬화 완료: ${SerialPacketHandler.bytesToHexString(serializedPacket)}")
+
             val result = serial422Device.sendData(serializedPacket)
 
             if (result.isSuccess) {
-                // 실제 구현에서는 응답을 기다려야 함
-                // 여기서는 단순화를 위해 성공 응답을 반환
+                Timber.d("패킷 전송 성공")
+
+                // TODO: 실제 구현에서는 응답을 기다려야 함
+                // 여기서는 단순화를 위해 성공 응답을 바로 반환
                 Result.success(SerialResponse.Success(
                     controlCommand = packet.controlCommand.value,
                     actionCommand = packet.actionCommand.value,
                     data = null
                 ))
             } else {
-                Result.failure(result.exceptionOrNull() ?: Exception("Unknown error"))
+                val exception = result.exceptionOrNull() ?: Exception("알 수 없는 오류")
+                Timber.e(exception, "패킷 전송 실패")
+                Result.failure(exception)
             }
         } catch (e: Exception) {
-            Timber.e(e, "Error sending packet")
+            Timber.e(e, "패킷 전송 중 예외 발생")
             Result.failure(e)
         }
     }
 
-    override fun receiveData(): Flow<SerialResponse> = responseFlow
+    override fun receiveData(): Flow<SerialResponse> {
+        Timber.d("receiveData() 호출됨")
+        return responseFlow
+    }
 
-    override fun isConnected(): Boolean = serial422Device.isConnected()
-
-    /**
-     * 패킷을 바이트 배열로 직렬화
-     */
-    private fun serializePacket(packet: SerialPacket): ByteArray {
-        val dataLength = packet.data?.size ?: 0
-        val totalLength = 10 + dataLength // 헤더(8) + 데이터 + 체크섬(1) + 종료(1)
-
-        val result = ByteArray(totalLength)
-
-        // 프로토콜 헤더 설정
-        result[0] = SerialPacket.PROTOCOL_FIRST
-        result[1] = SerialPacket.PROTOCOL_SECOND
-        result[2] = packet.targetId
-        result[3] = packet.sourceId
-
-        // 패킷 길이 설정 (2바이트)
-        val packetLength = 8 + dataLength
-        result[4] = ((packetLength shr 8) and 0xFF).toByte()
-        result[5] = (packetLength and 0xFF).toByte()
-
-        // 명령어 설정
-        result[6] = packet.controlCommand.value.toByte()
-        result[7] = packet.actionCommand.value.toByte()
-
-        // 데이터 복사
-        packet.data?.forEachIndexed { index, byte ->
-            result[8 + index] = byte
-        }
-
-        // 체크섬 계산 및 설정
-        var checksum: Byte = 0
-        for (i in 0 until 8 + dataLength) {
-            checksum = (checksum + result[i]).toByte()
-        }
-        result[8 + dataLength] = checksum
-
-        // 종료 바이트 설정
-        result[9 + dataLength] = SerialPacket.PROTOCOL_END
-
-        return result
+    override fun isConnected(): Boolean {
+        val connected = serial422Device.isConnected()
+        Timber.d("isConnected() = $connected")
+        return connected
     }
 
     /**
-     * 수신된 바이트 배열을 응답 객체로 파싱
+     * 초기화 요청 패킷 전송
      */
-    private fun parseResponse(buffer: ByteArray, size: Int): SerialResponse {
-        // 패킷 유효성 검사 (간단한 구현)
-        if (size < 10 || buffer[0] != SerialPacket.PROTOCOL_FIRST || buffer[1] != SerialPacket.PROTOCOL_SECOND) {
-            return SerialResponse.Error(Exception("Invalid packet format"))
-        }
+    private suspend fun sendInitialRequest() {
+        try {
+            Timber.d("초기화 요청 전송 중...")
 
-        // 체크섬 검증
-        val dataLength = (((buffer[4].toInt() and 0xFF) shl 8) or (buffer[5].toInt() and 0xFF)) - 8
-        var calculatedChecksum: Byte = 0
+            val packet = SerialPacket(
+                controlCommand = SerialCommand.Control.CommGetInfo,
+                actionCommand = SerialCommand.Action.InitialReq,
+                data = null,
+                targetId = SerialPacket.TARGET_MAIN,    // 0x24
+                sourceId = SerialPacket.SOURCE_CONSOLE  // 0x25
+            )
 
-        for (i in 0 until 8 + dataLength) {
-            calculatedChecksum = (calculatedChecksum + buffer[i]).toByte()
-        }
+            val result = sendPacket(packet)
 
-        if (calculatedChecksum != buffer[8 + dataLength]) {
-            return SerialResponse.Error(Exception("Checksum mismatch"))
-        }
-
-        // 컨트롤 및 액션 명령어 추출
-        val controlCommand = buffer[6].toInt() and 0xFF
-        val actionCommand = buffer[7].toInt() and 0xFF
-
-        // 데이터 추출
-        val data = if (dataLength > 0) {
-            ByteArray(dataLength).apply {
-                System.arraycopy(buffer, 8, this, 0, dataLength)
+            if (result.isSuccess) {
+                Timber.d("초기화 요청 전송 성공")
+            } else {
+                Timber.e("초기화 요청 전송 실패")
             }
-        } else null
+        } catch (e: Exception) {
+            Timber.e(e, "초기화 요청 전송 중 예외 발생")
+        }
+    }
 
-        return SerialResponse.Success(
-            controlCommand = controlCommand,
-            actionCommand = actionCommand,
-            data = data
-        )
+    /**
+     * 하트비트 패킷 전송
+     */
+    override suspend fun sendHeartbeat(): Result<SerialResponse> {
+        try {
+            Timber.d("하트비트 전송 중...")
+
+            val packet = SerialPacket(
+                controlCommand = SerialCommand.Control.CommStatusInfo,
+                actionCommand = SerialCommand.Action.HeartBeat,
+                data = null,
+                targetId = SerialPacket.TARGET_MAIN,    // 0x24
+                sourceId = SerialPacket.SOURCE_CONSOLE  // 0x25
+            )
+
+            return sendPacket(packet)
+        } catch (e: Exception) {
+            Timber.e(e, "하트비트 전송 중 예외 발생")
+            return Result.failure(e)
+        }
+    }
+
+    /**
+     * kV 값 설정 패킷 전송
+     */
+    override suspend fun setKvValue(kvValue: Int): Result<SerialResponse> {
+        try {
+            Timber.d("kV 값 설정 중: $kvValue")
+
+            // kV 값은 10배로 전송 (123.4kV -> 1234)
+            val kvData = SerialPacketHandler.createUShortData(kvValue * 10)
+
+            // DAC 값은 기기 의존적이므로 임시로 0 설정
+            val dacData = SerialPacketHandler.createUShortData(0)
+
+            // 최종 데이터 구성 (4바이트: kV값 2바이트 + DAC값 2바이트)
+            val data = ByteArray(4)
+            System.arraycopy(kvData, 0, data, 0, 2)
+            System.arraycopy(dacData, 0, data, 2, 2)
+
+            val packet = SerialPacket(
+                controlCommand = SerialCommand.Control.CommControl,
+                actionCommand = SerialCommand.Action.KvValue,
+                data = data,
+                targetId = SerialPacket.TARGET_MAIN,
+                sourceId = SerialPacket.SOURCE_CONSOLE
+            )
+
+            return sendPacket(packet)
+        } catch (e: Exception) {
+            Timber.e(e, "kV 값 설정 중 예외 발생")
+            return Result.failure(e)
+        }
+    }
+
+    /**
+     * mA 값 설정 패킷 전송
+     */
+    override suspend fun setMaValue(maValue: Int): Result<SerialResponse> {
+        try {
+            Timber.d("mA 값 설정 중: $maValue")
+
+            // mA 값은 10배로 전송 (123.4mA -> 1234)
+            val maData = SerialPacketHandler.createUShortData(maValue * 10)
+
+            // DAC 값은 기기 의존적이므로 임시로 0 설정
+            val dacData = SerialPacketHandler.createUShortData(0)
+
+            // 최종 데이터 구성 (4바이트: mA값 2바이트 + DAC값 2바이트)
+            val data = ByteArray(4)
+            System.arraycopy(maData, 0, data, 0, 2)
+            System.arraycopy(dacData, 0, data, 2, 2)
+
+            val packet = SerialPacket(
+                controlCommand = SerialCommand.Control.CommControl,
+                actionCommand = SerialCommand.Action.MaValue,
+                data = data,
+                targetId = SerialPacket.TARGET_MAIN,
+                sourceId = SerialPacket.SOURCE_CONSOLE
+            )
+
+            return sendPacket(packet)
+        } catch (e: Exception) {
+            Timber.e(e, "mA 값 설정 중 예외 발생")
+            return Result.failure(e)
+        }
+    }
+
+    /**
+     * 노출 시간 값 설정 패킷 전송
+     */
+    override suspend fun setTimeValue(timeMs: Int): Result<SerialResponse> {
+        try {
+            Timber.d("노출 시간 설정 중: $timeMs ms")
+
+            val timeData = SerialPacketHandler.createUShortData(timeMs)
+
+            val packet = SerialPacket(
+                controlCommand = SerialCommand.Control.CommControl,
+                actionCommand = SerialCommand.Action.TimeValue,
+                data = timeData,
+                targetId = SerialPacket.TARGET_MAIN,
+                sourceId = SerialPacket.SOURCE_CONSOLE
+            )
+
+            return sendPacket(packet)
+        } catch (e: Exception) {
+            Timber.e(e, "노출 시간 설정 중 예외 발생")
+            return Result.failure(e)
+        }
+    }
+
+    /**
+     * 동작 모드 설정 패킷 전송
+     */
+    override suspend fun setMode(mode: Int): Result<SerialResponse> {
+        try {
+            val modeStr = when(mode) {
+                0 -> "Manual"
+                1 -> "AEC"
+                2 -> "Manual_Continuous"
+                else -> "Unknown"
+            }
+            Timber.d("동작 모드 설정 중: $mode ($modeStr)")
+
+            val modeData = SerialPacketHandler.createUCharData(mode)
+
+            val packet = SerialPacket(
+                controlCommand = SerialCommand.Control.CommControl,
+                actionCommand = SerialCommand.Action.Mode,
+                data = modeData,
+                targetId = SerialPacket.TARGET_MAIN,
+                sourceId = SerialPacket.SOURCE_CONSOLE
+            )
+
+            return sendPacket(packet)
+        } catch (e: Exception) {
+            Timber.e(e, "동작 모드 설정 중 예외 발생")
+            return Result.failure(e)
+        }
+    }
+
+    /**
+     * 포커스 설정 패킷 전송 (0: Large, 1: Small)
+     */
+    override suspend fun setFocus(smallFocus: Boolean): Result<SerialResponse> {
+        try {
+            val focusValue = if (smallFocus) 1 else 0
+            val focusStr = if (smallFocus) "Small" else "Large"
+            Timber.d("포커스 설정 중: $focusValue ($focusStr)")
+
+            val focusData = SerialPacketHandler.createUCharData(focusValue)
+
+            val packet = SerialPacket(
+                controlCommand = SerialCommand.Control.CommControl,
+                actionCommand = SerialCommand.Action.Focus,
+                data = focusData,
+                targetId = SerialPacket.TARGET_MAIN,
+                sourceId = SerialPacket.SOURCE_CONSOLE
+            )
+
+            return sendPacket(packet)
+        } catch (e: Exception) {
+            Timber.e(e, "포커스 설정 중 예외 발생")
+            return Result.failure(e)
+        }
+    }
+
+    /**
+     * 버키 선택 패킷 전송 (0: Non Bucky, 1: Bucky 1, 2: Bucky 2)
+     */
+    override suspend fun selectBucky(buckyIndex: Int): Result<SerialResponse> {
+        try {
+            Timber.d("버키 선택 중: $buckyIndex")
+
+            val buckyData = SerialPacketHandler.createUCharData(buckyIndex)
+
+            val packet = SerialPacket(
+                controlCommand = SerialCommand.Control.CommControl,
+                actionCommand = SerialCommand.Action.BuckySelect,
+                data = buckyData,
+                targetId = SerialPacket.TARGET_MAIN,
+                sourceId = SerialPacket.SOURCE_CONSOLE
+            )
+
+            return sendPacket(packet)
+        } catch (e: Exception) {
+            Timber.e(e, "버키 선택 중 예외 발생")
+            return Result.failure(e)
+        }
+    }
+
+    /**
+     * 전원 진단 요청 패킷 전송
+     */
+    override suspend fun requestPowerDiagnosis(type: Int): Result<SerialResponse> {
+        try {
+            val typeStr = when(type) {
+                0 -> "Power 3.3V"
+                1 -> "Power 5V"
+                2 -> "Power +12V"
+                3 -> "Power -12V"
+                4 -> "Frequency"
+                5 -> "DC Link"
+                6 -> "Filament Current(Preheat)"
+                7 -> "Rotor Current(Starting)"
+                9 -> "Filament Current(Preheat, Small/Large)"
+                else -> "Unknown Type $type"
+            }
+            Timber.d("전원 진단 요청 중: $type ($typeStr)")
+
+            val typeData = SerialPacketHandler.createUCharData(type)
+
+            val packet = SerialPacket(
+                controlCommand = SerialCommand.Control.CommStatusInfo,
+                actionCommand = SerialCommand.Action.PowerDiagnosis,
+                data = typeData,
+                targetId = SerialPacket.TARGET_MAIN,
+                sourceId = SerialPacket.SOURCE_CONSOLE
+            )
+
+            return sendPacket(packet)
+        } catch (e: Exception) {
+            Timber.e(e, "전원 진단 요청 중 예외 발생")
+            return Result.failure(e)
+        }
+    }
+
+    /**
+     * 보드 버전 정보 요청 패킷 전송
+     */
+    override suspend fun requestBoardVersion(type: Int): Result<SerialResponse> {
+        try {
+            val typeStr = when(type) {
+                0 -> "Main Board App Version"
+                1 -> "AEC Board PCB Version"
+                2 -> "DC Link Board PCB Version"
+                3 -> "Filament Board PCB Version"
+                4 -> "Interface Board PCB Version"
+                5 -> "LSSBrake Board PCB Version"
+                6 -> "Main Board PCB Version"
+                7 -> "HSS Board PCB Version"
+                8 -> "HSS Board App Version"
+                else -> "Unknown Type $type"
+            }
+            Timber.d("보드 버전 정보 요청 중: $type ($typeStr)")
+
+            val typeData = SerialPacketHandler.createUCharData(type)
+
+            val packet = SerialPacket(
+                controlCommand = SerialCommand.Control.CommStatusInfo,
+                actionCommand = SerialCommand.Action.TBoardVersion,
+                data = typeData,
+                targetId = SerialPacket.TARGET_MAIN,
+                sourceId = SerialPacket.SOURCE_CONSOLE
+            )
+
+            return sendPacket(packet)
+        } catch (e: Exception) {
+            Timber.e(e, "보드 버전 정보 요청 중 예외 발생")
+            return Result.failure(e)
+        }
     }
 }

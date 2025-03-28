@@ -1,108 +1,310 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout
+<ScrollView
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:padding="16dp">
+    android:layout_height="match_parent">
 
-    <TextView
-        android:id="@+id/tvTitle"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="발전기 제어 테스트"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <TextView
-        android:id="@+id/tvConnectionStatus"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="연결 끊김"
-        android:textSize="18sp"
-        android:textColor="@android:color/holo_red_dark"
-        android:layout_marginTop="16dp"
-        app:layout_constraintTop_toBottomOf="@id/tvTitle"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <Button
-        android:id="@+id/btnConnect"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:text="장치 연결"
-        android:layout_marginTop="32dp"
-        app:layout_constraintTop_toBottomOf="@id/tvConnectionStatus"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <Button
-        android:id="@+id/btnHeartbeat"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:text="하트비트 전송"
-        android:layout_marginTop="16dp"
-        app:layout_constraintTop_toBottomOf="@id/btnConnect"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <TextView
-        android:id="@+id/tvStatusLabel"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="상태:"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:layout_marginTop="32dp"
-        app:layout_constraintTop_toBottomOf="@id/btnHeartbeat"
-        app:layout_constraintStart_toStartOf="parent" />
-
-    <TextView
-        android:id="@+id/tvStatus"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:text="대기 중"
-        android:textSize="16sp"
-        android:layout_marginStart="8dp"
-        app:layout_constraintTop_toTopOf="@id/tvStatusLabel"
-        app:layout_constraintStart_toEndOf="@id/tvStatusLabel"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <View
-        android:id="@+id/divider"
+    <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:background="@android:color/darker_gray"
-        android:layout_marginTop="32dp"
-        app:layout_constraintTop_toBottomOf="@id/tvStatus" />
-
-    <TextView
-        android:id="@+id/tvResponseTitle"
-        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="수신 데이터"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        android:layout_marginTop="16dp"
-        app:layout_constraintTop_toBottomOf="@id/divider"
-        app:layout_constraintStart_toStartOf="parent" />
-
-    <androidx.core.widget.NestedScrollView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="8dp"
-        app:layout_constraintTop_toBottomOf="@id/tvResponseTitle"
-        app:layout_constraintBottom_toBottomOf="parent">
+        android:padding="16dp">
 
         <TextView
-            android:id="@+id/tvResponseData"
-            android:layout_width="match_parent"
+            android:id="@+id/tvTitle"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:fontFamily="monospace"
-            android:textSize="12sp" />
-    </androidx.core.widget.NestedScrollView>
+            android:text="발전기 제어 테스트"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+        <TextView
+            android:id="@+id/tvConnectionStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="연결 끊김"
+            android:textSize="18sp"
+            android:textColor="@android:color/holo_red_dark"
+            android:layout_marginTop="16dp"
+            app:layout_constraintTop_toBottomOf="@id/tvTitle"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- 기본 버튼 섹션 -->
+        <TextView
+            android:id="@+id/tvBasicControlTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="기본 제어"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginTop="24dp"
+            app:layout_constraintTop_toBottomOf="@id/tvConnectionStatus"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <Button
+            android:id="@+id/btnConnect"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="장치 연결"
+            android:layout_marginTop="8dp"
+            app:layout_constraintTop_toBottomOf="@id/tvBasicControlTitle"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <Button
+            android:id="@+id/btnHeartbeat"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="하트비트 전송"
+            android:layout_marginTop="8dp"
+            app:layout_constraintTop_toBottomOf="@id/btnConnect"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <Button
+            android:id="@+id/btnPowerDiagnosis"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="전원 진단"
+            android:layout_marginTop="8dp"
+            app:layout_constraintTop_toBottomOf="@id/btnHeartbeat"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <Button
+            android:id="@+id/btnVersionInfo"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="버전 정보"
+            android:layout_marginTop="8dp"
+            app:layout_constraintTop_toBottomOf="@id/btnPowerDiagnosis"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- 파라미터 설정 섹션 -->
+        <TextView
+            android:id="@+id/tvParameterTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="파라미터 설정"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginTop="24dp"
+            app:layout_constraintTop_toBottomOf="@id/btnVersionInfo"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <!-- kV 설정 -->
+        <TextView
+            android:id="@+id/tvKvLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="kV 설정"
+            android:layout_marginTop="8dp"
+            app:layout_constraintTop_toBottomOf="@id/tvParameterTitle"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <EditText
+            android:id="@+id/etKvValue"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:hint="40 ~ 150 (4.0 ~ 15.0 kV)"
+            android:inputType="number"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="8dp"
+            app:layout_constraintTop_toTopOf="@id/tvKvLabel"
+            app:layout_constraintBottom_toBottomOf="@id/tvKvLabel"
+            app:layout_constraintStart_toEndOf="@id/tvKvLabel"
+            app:layout_constraintEnd_toStartOf="@id/btnSetKv" />
+
+        <Button
+            android:id="@+id/btnSetKv"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="설정"
+            app:layout_constraintTop_toTopOf="@id/etKvValue"
+            app:layout_constraintBottom_toBottomOf="@id/etKvValue"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- mA 설정 -->
+        <TextView
+            android:id="@+id/tvMaLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="mA 설정"
+            android:layout_marginTop="16dp"
+            app:layout_constraintTop_toBottomOf="@id/etKvValue"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <EditText
+            android:id="@+id/etMaValue"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:hint="10 ~ 500 (1.0 ~ 50.0 mA)"
+            android:inputType="number"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="8dp"
+            app:layout_constraintTop_toTopOf="@id/tvMaLabel"
+            app:layout_constraintBottom_toBottomOf="@id/tvMaLabel"
+            app:layout_constraintStart_toEndOf="@id/tvMaLabel"
+            app:layout_constraintEnd_toStartOf="@id/btnSetMa" />
+
+        <Button
+            android:id="@+id/btnSetMa"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="설정"
+            app:layout_constraintTop_toTopOf="@id/etMaValue"
+            app:layout_constraintBottom_toBottomOf="@id/etMaValue"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- 노출 시간 설정 -->
+        <TextView
+            android:id="@+id/tvTimeLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="노출 시간"
+            android:layout_marginTop="16dp"
+            app:layout_constraintTop_toBottomOf="@id/etMaValue"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <EditText
+            android:id="@+id/etTimeValue"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:hint="1 ~ 10000 ms"
+            android:inputType="number"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="8dp"
+            app:layout_constraintTop_toTopOf="@id/tvTimeLabel"
+            app:layout_constraintBottom_toBottomOf="@id/tvTimeLabel"
+            app:layout_constraintStart_toEndOf="@id/tvTimeLabel"
+            app:layout_constraintEnd_toStartOf="@id/btnSetTime" />
+
+        <Button
+            android:id="@+id/btnSetTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="설정"
+            app:layout_constraintTop_toTopOf="@id/etTimeValue"
+            app:layout_constraintBottom_toBottomOf="@id/etTimeValue"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- 포커스 설정 -->
+        <TextView
+            android:id="@+id/tvFocusLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="포커스"
+            android:layout_marginTop="16dp"
+            app:layout_constraintTop_toBottomOf="@id/etTimeValue"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <RadioGroup
+            android:id="@+id/rgFocus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginStart="16dp"
+            app:layout_constraintTop_toTopOf="@id/tvFocusLabel"
+            app:layout_constraintBottom_toBottomOf="@id/tvFocusLabel"
+            app:layout_constraintStart_toEndOf="@id/tvFocusLabel">
+
+            <RadioButton
+                android:id="@+id/rbFocusLarge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Large"
+                android:checked="true" />
+
+            <RadioButton
+                android:id="@+id/rbFocusSmall"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Small"
+                android:layout_marginStart="8dp" />
+        </RadioGroup>
+
+        <Button
+            android:id="@+id/btnSetFocus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="설정"
+            app:layout_constraintTop_toTopOf="@id/rgFocus"
+            app:layout_constraintBottom_toBottomOf="@id/rgFocus"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- 상태 및 로그 섹션 -->
+        <TextView
+            android:id="@+id/tvStatusLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="상태:"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginTop="32dp"
+            app:layout_constraintTop_toBottomOf="@id/rgFocus"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="대기 중"
+            android:textSize="16sp"
+            android:layout_marginStart="8dp"
+            app:layout_constraintTop_toTopOf="@id/tvStatusLabel"
+            app:layout_constraintStart_toEndOf="@id/tvStatusLabel"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <View
+            android:id="@+id/divider"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@android:color/darker_gray"
+            android:layout_marginTop="16dp"
+            app:layout_constraintTop_toBottomOf="@id/tvStatus" />
+
+        <TextView
+            android:id="@+id/tvResponseTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="수신 데이터"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginTop="16dp"
+            app:layout_constraintTop_toBottomOf="@id/divider"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <Button
+            android:id="@+id/btnClearLog"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="로그 지우기"
+            android:textSize="12sp"
+            app:layout_constraintTop_toTopOf="@id/tvResponseTitle"
+            app:layout_constraintBottom_toBottomOf="@id/tvResponseTitle"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="200dp"
+            android:layout_marginTop="8dp"
+            android:background="#F5F5F5"
+            app:layout_constraintTop_toBottomOf="@id/tvResponseTitle"
+            app:layout_constraintBottom_toBottomOf="parent">
+
+            <TextView
+                android:id="@+id/tvResponseData"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textSize="12sp"
+                android:padding="8dp" />
+        </androidx.core.widget.NestedScrollView>
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</ScrollView>
