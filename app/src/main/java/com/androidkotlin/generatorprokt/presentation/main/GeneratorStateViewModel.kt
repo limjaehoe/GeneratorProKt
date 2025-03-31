@@ -115,6 +115,7 @@ class GeneratorStateViewModel @Inject constructor(
      * STANDBY 모드로 변경
      */
     fun setStandbyMode() {
+        Timber.d("대기 모드로 변경 요청") // 로그 추가
         setMode(MainMode.STANDBY)
     }
 

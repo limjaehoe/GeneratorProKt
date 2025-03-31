@@ -69,7 +69,7 @@ class GeneratorRepositoryImpl @Inject constructor(
                 val newMode = MainMode.fromRawValue(modeValue)
 
                 Timber.d("시스템 상태 업데이트: $newMode (0x${modeValue.toString(16)})")
-                _currentMode.value = newMode
+                _currentMode.value = newMode // 여기서 StateFlow가 업데이트됨
             }
         }
     }

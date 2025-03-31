@@ -1,6 +1,7 @@
 package com.androidkotlin.generatorprokt.data.device
 
 import android.os.SystemClock
+import android.util.Log
 import android_serialport_api.SerialPort
 import android_serialport_api.SerialPortFinder
 import kotlinx.coroutines.CoroutineDispatcher
@@ -225,4 +226,7 @@ class Serial422Device @Inject constructor(
             Timber.e(e, "권한 설정 실패: $path")
         }
     }
+
+
+
 }

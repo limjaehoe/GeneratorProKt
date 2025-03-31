@@ -9,8 +9,11 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.method.ScrollingMovementMethod
 import android.util.Log
+import android.view.View
 import android.widget.Toast
 import android_serialport_api.SerialPortFinder
 import androidx.activity.viewModels
@@ -43,24 +46,6 @@ class HomeActivity : AppCompatActivity() {
         setupUI()
         observeViewModel()
 
-        // GeneratorStateView 디버깅
-        binding.generatorStateView.post {
-            Timber.d("GeneratorStateView 정보 - 가시성: ${binding.generatorStateView.visibility}, " +
-                    "너비: ${binding.generatorStateView.width}, " +
-                    "높이: ${binding.generatorStateView.height}")
-        }
-
-        // 강제로 배경색 설정하여 뷰가 보이는지 확인
-        binding.generatorStateView.setBackgroundColor(Color.RED)
-
-
-//        try {
-//            Toast.makeText(this, "라이브러리 로드 시도", Toast.LENGTH_SHORT).show()
-//            System.loadLibrary("serial_port")
-//            Toast.makeText(this, "라이브러리 로드 성공", Toast.LENGTH_SHORT).show()
-//        } catch (e: Exception) {
-//            Toast.makeText(this, "라이브러리 로드 실패: ${e.message}", Toast.LENGTH_LONG).show()
-//        }
 
         val portFinder = SerialPortFinder()
         val devices = portFinder.allDevices
@@ -77,6 +62,7 @@ class HomeActivity : AppCompatActivity() {
         val hasTtyS3 = paths.any { it.contains("ttyS3") }
         Log.e("SERIAL_TEST", "ttyS3 포트 발견됨: $hasTtyS3")
         Toast.makeText(this, "ttyS3 포트 발견됨: $hasTtyS3", Toast.LENGTH_LONG).show()
+
     }
 
     // USB 권한 요청에 필요한 인텐트 필터 설정
@@ -132,7 +118,6 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
-        //binding.generatorStateView.currentMode = MainMode.STANDBY // 강제로 상태 설정 테스트
 
         // 발전기 상태 모드 변경 버튼
         binding.btnStandbyMode.setOnClickListener {
@@ -141,18 +126,35 @@ class HomeActivity : AppCompatActivity() {
             Timber.d("대기 모드 버튼 클릭됨")
             Toast.makeText(this, "대기 모드 버튼 클릭됨", Toast.LENGTH_SHORT).show()
             generatorStateViewModel.setStandbyMode()
+
+            // 직접 테스트
+            Handler(Looper.getMainLooper()).postDelayed({
+                binding.generatorStateView.currentMode = MainMode.STANDBY
+                binding.generatorStateView.postInvalidate()
+                Log.d("HomeActivity", "직접 모드 변경 시도")
+            }, 500)
         }
 
         binding.btnReadyMode.setOnClickListener {
             // 로그 추가
             Timber.d("Ready 모드 버튼 클릭됨")
             generatorStateViewModel.setReadyMode()
+
+            Handler(Looper.getMainLooper()).postDelayed({
+                binding.generatorStateView.currentMode = MainMode.EXPOSURE_READY
+                binding.generatorStateView.postInvalidate()
+            }, 500)
         }
 
         binding.btnExposureMode.setOnClickListener {
             // 로그 추가
             Timber.d("Exposure 모드 버튼 클릭됨")
             generatorStateViewModel.setExposureMode()
+
+            Handler(Looper.getMainLooper()).postDelayed({
+                binding.generatorStateView.currentMode = MainMode.EXPOSURE
+                binding.generatorStateView.postInvalidate()
+            }, 500)
         }
 
         // 기본 버튼 설정
@@ -253,50 +255,36 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun observeViewModel() {
-        lifecycleScope.launch {
-            viewModel.uiState.collectLatest { state ->
-                when (state) {
-                    is GeneratorUiState.Idle -> {
-                        binding.tvStatus.text = "대기 중"
-                        Timber.d("UI 상태: 대기 중")
-                    }
-                    is GeneratorUiState.Loading -> {
-                        binding.tvStatus.text = "로딩 중..."
-                        Timber.d("UI 상태: 로딩 중...")
-                    }
-                    is GeneratorUiState.Success -> {
-                        binding.tvStatus.text = state.message
-                        Timber.d("UI 상태: 성공 - ${state.message}")
-                    }
-                    is GeneratorUiState.Error -> {
-                        binding.tvStatus.text = "오류: ${state.message}"
-                        Timber.e("UI 상태: 오류 - ${state.message}")
-                    }
-                    is GeneratorUiState.Ready -> {
-                        binding.tvStatus.text = state.message
-                        Timber.d("UI 상태: 준비됨 - ${state.message}")
-                    }
-                    is GeneratorUiState.Exposing -> {
-                        binding.tvStatus.text = state.message
-                        Timber.d("UI 상태: 노출 중 - ${state.message}")
-                    }
-                }
-            }
-        }
-
-        // generatorStateViewModel 관찰 코드 추가
-        lifecycleScope.launch {
-            generatorStateViewModel.currentMode.collectLatest { mode ->
-                // GeneratorStateView 업데이트
-                binding.generatorStateView.currentMode = mode
-
-                // 로그 출력
-                Timber.d("발전기 상태 변경: ${mode.name} (0x${mode.hexValue.toString(16)})")
-
-                // 상태에 따른 버튼 활성화/비활성화
-                updateUIBasedOnMode(mode)
-            }
-        }
+//        lifecycleScope.launch {
+//            viewModel.uiState.collectLatest { state ->
+//                when (state) {
+//                    is GeneratorUiState.Idle -> {
+//                        binding.tvStatus.text = "대기 중"
+//                        Timber.d("UI 상태: 대기 중")
+//                    }
+//                    is GeneratorUiState.Loading -> {
+//                        binding.tvStatus.text = "로딩 중..."
+//                        Timber.d("UI 상태: 로딩 중...")
+//                    }
+//                    is GeneratorUiState.Success -> {
+//                        binding.tvStatus.text = state.message
+//                        Timber.d("UI 상태: 성공 - ${state.message}")
+//                    }
+//                    is GeneratorUiState.Error -> {
+//                        binding.tvStatus.text = "오류: ${state.message}"
+//                        Timber.e("UI 상태: 오류 - ${state.message}")
+//                    }
+//                    is GeneratorUiState.Ready -> {
+//                        binding.tvStatus.text = state.message
+//                        Timber.d("UI 상태: 준비됨 - ${state.message}")
+//                    }
+//                    is GeneratorUiState.Exposing -> {
+//                        binding.tvStatus.text = state.message
+//                        Timber.d("UI 상태: 노출 중 - ${state.message}")
+//                    }
+//                }
+//            }
+//        }
 
         lifecycleScope.launch {
             generatorStateViewModel.uiState.collectLatest { state ->
@@ -389,6 +377,24 @@ class HomeActivity : AppCompatActivity() {
                 }
             }
         }
+
+
+
+        // generatorStateViewModel 관찰 코드 추가
+        lifecycleScope.launch {
+            generatorStateViewModel.currentMode.collectLatest { mode ->
+                // GeneratorStateView 업데이트
+                binding.generatorStateView.currentMode = mode
+                binding.generatorStateView.invalidate() // 명시적 갱신 추가
+
+                // 로그 출력
+                Timber.d("발전기 상태 변경: ${mode.name} (0x${mode.hexValue.toString(16)})")
+
+                // 상태에 따른 버튼 활성화/비활성화
+                updateUIBasedOnMode(mode)
+            }
+        }
+
 
         lifecycleScope.launch {
             viewModel.receivedData.collectLatest { logMessage ->

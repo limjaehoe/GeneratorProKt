@@ -31,7 +31,8 @@ class GeneratorStateView @JvmOverloads constructor(
         set(value) {
             field = value
             Timber.d("GeneratorStateView - 모드 변경: $value (${value.hexValue})")
-            invalidate() // 상태가 변경되면 뷰 다시 그리기
+            //invalidate() // 상태가 변경되면 뷰 다시 그리기
+            postInvalidate()
         }
 
     // 상태별 색상 정의
@@ -56,6 +57,9 @@ class GeneratorStateView @JvmOverloads constructor(
 
         // 로그로 onDraw가 호출되었는지 확인
         Timber.d("GeneratorStateView - onDraw 호출: 현재 모드 = $currentMode")
+        Timber.d("GeneratorStateView - onDraw 크기: 너비=$width, 높이=$height")
+        Timber.d("GeneratorStateView - 모드 그리기: ${currentMode.name}, 16진수: 0x${currentMode.hexValue.toString(16)}")
+
 
         // 배경 색상 설정
         val bgColor = modeColors[currentMode] ?: Color.GRAY
@@ -96,5 +100,12 @@ class GeneratorStateView @JvmOverloads constructor(
         return darkness >= 0.5
     }
 
+    // 올바른 측정을 보장하기 위해 이 메서드 추가
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        Timber.d("GeneratorStateView - onMeasure 호출됨: " +
+                "너비=${MeasureSpec.getSize(widthMeasureSpec)}, " +
+                "높이=${MeasureSpec.getSize(heightMeasureSpec)}")
+    }
 
 }
