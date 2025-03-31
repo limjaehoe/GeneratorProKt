@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Color
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
@@ -17,7 +18,9 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.androidkotlin.generatorprokt.databinding.ActivityHomeBinding
+import com.androidkotlin.generatorprokt.domain.model.MainMode
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -27,6 +30,7 @@ class HomeActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityHomeBinding
     private val viewModel: HomeViewModel by viewModels()
+    private val generatorStateViewModel: GeneratorStateViewModel by viewModels() // 추가
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,6 +42,17 @@ class HomeActivity : AppCompatActivity() {
 
         setupUI()
         observeViewModel()
+
+        // GeneratorStateView 디버깅
+        binding.generatorStateView.post {
+            Timber.d("GeneratorStateView 정보 - 가시성: ${binding.generatorStateView.visibility}, " +
+                    "너비: ${binding.generatorStateView.width}, " +
+                    "높이: ${binding.generatorStateView.height}")
+        }
+
+        // 강제로 배경색 설정하여 뷰가 보이는지 확인
+        binding.generatorStateView.setBackgroundColor(Color.RED)
+
 
 //        try {
 //            Toast.makeText(this, "라이브러리 로드 시도", Toast.LENGTH_SHORT).show()
@@ -117,6 +132,29 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
+        //binding.generatorStateView.currentMode = MainMode.STANDBY // 강제로 상태 설정 테스트
+
+        // 발전기 상태 모드 변경 버튼
+        binding.btnStandbyMode.setOnClickListener {
+            // 일반 Log 추가
+            Log.d("HomeActivity", "대기 모드 버튼 클릭됨")
+            Timber.d("대기 모드 버튼 클릭됨")
+            Toast.makeText(this, "대기 모드 버튼 클릭됨", Toast.LENGTH_SHORT).show()
+            generatorStateViewModel.setStandbyMode()
+        }
+
+        binding.btnReadyMode.setOnClickListener {
+            // 로그 추가
+            Timber.d("Ready 모드 버튼 클릭됨")
+            generatorStateViewModel.setReadyMode()
+        }
+
+        binding.btnExposureMode.setOnClickListener {
+            // 로그 추가
+            Timber.d("Exposure 모드 버튼 클릭됨")
+            generatorStateViewModel.setExposureMode()
+        }
+
         // 기본 버튼 설정
         binding.btnConnect.setOnClickListener {
             Timber.d("연결 버튼이 클릭되었습니다")
@@ -234,6 +272,68 @@ class HomeActivity : AppCompatActivity() {
                         binding.tvStatus.text = "오류: ${state.message}"
                         Timber.e("UI 상태: 오류 - ${state.message}")
                     }
+                    is GeneratorUiState.Ready -> {
+                        binding.tvStatus.text = state.message
+                        Timber.d("UI 상태: 준비됨 - ${state.message}")
+                    }
+                    is GeneratorUiState.Exposing -> {
+                        binding.tvStatus.text = state.message
+                        Timber.d("UI 상태: 노출 중 - ${state.message}")
+                    }
+                }
+            }
+        }
+
+        // generatorStateViewModel 관찰 코드 추가
+        lifecycleScope.launch {
+            generatorStateViewModel.currentMode.collectLatest { mode ->
+                // GeneratorStateView 업데이트
+                binding.generatorStateView.currentMode = mode
+
+                // 로그 출력
+                Timber.d("발전기 상태 변경: ${mode.name} (0x${mode.hexValue.toString(16)})")
+
+                // 상태에 따른 버튼 활성화/비활성화
+                updateUIBasedOnMode(mode)
+            }
+        }
+
+        lifecycleScope.launch {
+            generatorStateViewModel.uiState.collectLatest { state ->
+                when (state) {
+                    is GeneratorUiState.Loading -> {
+                        binding.tvStatus.text = "발전기 상태 로딩 중..."
+                    }
+                    is GeneratorUiState.Error -> {
+                        binding.tvStatus.text = "발전기 오류: ${state.message}"
+                        // 오류 시 경고 다이얼로그 표시 (중요 오류일 경우)
+                        if (state.message.contains("긴급") || state.message.contains("오류")) {
+                            showErrorDialog(state.message)
+                        }
+                    }
+                    is GeneratorUiState.Exposing -> {
+                        binding.tvStatus.text = "노출 중: ${state.message}"
+                        // 노출 중일 때는 특별한 UI 표시 (예: 경고 표시)
+                        binding.tvStatus.setTextColor(getColor(android.R.color.holo_red_dark))
+                    }
+                    is GeneratorUiState.Ready -> {
+                        binding.tvStatus.text = "준비 완료: ${state.message}"
+                        binding.tvStatus.setTextColor(getColor(android.R.color.holo_green_dark))
+                    }
+                    is GeneratorUiState.Idle -> {
+                        binding.tvStatus.text = "대기 중: ${state.message}"
+                        binding.tvStatus.setTextColor(getColor(android.R.color.black))
+                    }
+                    is GeneratorUiState.Success -> {
+                        binding.tvStatus.text = state.message
+                        binding.tvStatus.setTextColor(getColor(android.R.color.holo_blue_dark))
+
+                        // 성공 메시지는 3초 후 원래 상태로 돌아가게 함
+                        lifecycleScope.launch {
+                            delay(3000)
+                            binding.tvStatus.setTextColor(getColor(android.R.color.black))
+                        }
+                    }
                 }
             }
         }
@@ -328,5 +428,77 @@ class HomeActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Timber.e(e, "USB 장치 이벤트 리시버 등록 해제 중 오류 발생")
         }
+    }
+
+    private fun updateUIBasedOnMode(mode: MainMode) {
+        when (mode) {
+            MainMode.EXPOSURE, MainMode.EXPOSURE_READY, MainMode.EXPOSURE_READY_DONE -> {
+                // 노출 관련 모드일 때는 다른 설정 버튼을 비활성화
+                binding.btnSetKv.isEnabled = false
+                binding.btnSetMa.isEnabled = false
+                binding.btnSetTime.isEnabled = false
+                binding.btnSetFocus.isEnabled = false
+
+                // Exposure 버튼 활성화
+                binding.btnExpose.isEnabled = true
+
+                // Ready, Exposure 버튼 강조 표시
+                binding.btnReadyMode.alpha = if (mode == MainMode.EXPOSURE_READY || mode == MainMode.EXPOSURE_READY_DONE) 0.7f else 1.0f
+                binding.btnExposureMode.alpha = if (mode == MainMode.EXPOSURE) 0.7f else 1.0f
+            }
+            MainMode.STANDBY -> {
+                // 대기 모드일 때는 모든 설정 버튼 활성화
+                binding.btnSetKv.isEnabled = true
+                binding.btnSetMa.isEnabled = true
+                binding.btnSetTime.isEnabled = true
+                binding.btnSetFocus.isEnabled = true
+
+                // Exposure 버튼 비활성화
+                binding.btnExpose.isEnabled = false
+
+                // 대기 모드 버튼 강조 표시
+                binding.btnStandbyMode.alpha = 0.7f
+                binding.btnReadyMode.alpha = 1.0f
+                binding.btnExposureMode.alpha = 1.0f
+            }
+            MainMode.ERROR, MainMode.EMERGENCY -> {
+                // 오류 상태일 때는 모든 버튼 비활성화
+                binding.btnSetKv.isEnabled = false
+                binding.btnSetMa.isEnabled = false
+                binding.btnSetTime.isEnabled = false
+                binding.btnSetFocus.isEnabled = false
+                binding.btnExpose.isEnabled = false
+
+                // 모든 버튼 정상 표시
+                binding.btnStandbyMode.alpha = 1.0f
+                binding.btnReadyMode.alpha = 1.0f
+                binding.btnExposureMode.alpha = 1.0f
+
+                // 오류 메시지 표시
+                val errorMessage = if (mode == MainMode.ERROR) "시스템 오류 발생" else "긴급 정지 상태"
+                showErrorDialog(errorMessage)
+            }
+            else -> {
+                // 기타 모드에서는 기본 상태로 설정
+                binding.btnSetKv.isEnabled = true
+                binding.btnSetMa.isEnabled = true
+                binding.btnSetTime.isEnabled = true
+                binding.btnSetFocus.isEnabled = true
+                binding.btnExpose.isEnabled = false
+
+                // 모든 버튼 정상 표시
+                binding.btnStandbyMode.alpha = 1.0f
+                binding.btnReadyMode.alpha = 1.0f
+                binding.btnExposureMode.alpha = 1.0f
+            }
+        }
+    }
+
+    private fun showErrorDialog(message: String) {
+        AlertDialog.Builder(this)
+            .setTitle("발전기 알림")
+            .setMessage(message)
+            .setPositiveButton("확인", null)
+            .show()
     }
 }

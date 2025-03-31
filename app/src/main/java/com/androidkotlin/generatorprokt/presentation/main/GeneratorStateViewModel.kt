@@ -88,6 +88,8 @@ class GeneratorStateViewModel @Inject constructor(
      */
     fun setMode(mode: MainMode) {
         viewModelScope.launch {
+            // 로그 추가
+            Timber.d("모드 변경 요청 시작: $mode")
             _uiState.value = GeneratorUiState.Loading
 
             generatorRepository.setMode(mode)
@@ -122,15 +124,6 @@ class GeneratorStateViewModel @Inject constructor(
     fun setExposureMode() {
         setMode(MainMode.EXPOSURE)
     }
-}
 
-/**
- * UI 상태를 나타내는 sealed class
- */
-sealed class GeneratorUiState {
-    object Loading : GeneratorUiState()
-    data class Idle(val message: String) : GeneratorUiState()
-    data class Ready(val message: String) : GeneratorUiState()
-    data class Exposing(val message: String) : GeneratorUiState()
-    data class Error(val message: String) : GeneratorUiState()
+
 }

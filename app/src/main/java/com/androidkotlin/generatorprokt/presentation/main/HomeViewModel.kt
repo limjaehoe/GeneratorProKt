@@ -4,8 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.androidkotlin.generatorprokt.data.device.SerialPacketHandler
 import com.androidkotlin.generatorprokt.domain.model.SerialCommand
-import com.androidkotlin.generatorprokt.domain.model.SerialPacket
 import com.androidkotlin.generatorprokt.domain.model.SerialResponse
+import com.androidkotlin.generatorprokt.domain.repository.GeneratorRepository
 import com.androidkotlin.generatorprokt.domain.usecase.ConnectSerialUseCase
 import com.androidkotlin.generatorprokt.domain.usecase.ReceiveSerialDataUseCase
 import com.androidkotlin.generatorprokt.domain.usecase.SendGeneratorCommandUseCase
@@ -26,10 +26,11 @@ import javax.inject.Inject
 class HomeViewModel @Inject constructor(
     private val connectSerialUseCase: ConnectSerialUseCase,
     private val sendGeneratorCommandUseCase: SendGeneratorCommandUseCase,
-    private val receiveSerialDataUseCase: ReceiveSerialDataUseCase
+    private val receiveSerialDataUseCase: ReceiveSerialDataUseCase,
+    private val generatorRepository: GeneratorRepository
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow<GeneratorUiState>(GeneratorUiState.Idle)
+    private val _uiState = MutableStateFlow<GeneratorUiState>(GeneratorUiState.Idle("대기 중"))
     val uiState: StateFlow<GeneratorUiState> = _uiState
 
     private val _deviceStatus = MutableStateFlow<DeviceStatus>(DeviceStatus.Disconnected)
@@ -47,11 +48,14 @@ class HomeViewModel @Inject constructor(
                         processResponse(response)
                         logResponse(response)
                     }
+
                     is SerialResponse.Error -> {
                         Timber.e(response.exception, "Error receiving data")
-                        _uiState.value = GeneratorUiState.Error("통신 오류: ${response.exception.message}")
+                        _uiState.value =
+                            GeneratorUiState.Error("통신 오류: ${response.exception.message}")
                         _receivedData.emit("ERROR: ${response.exception.message}")
                     }
+
                     is SerialResponse.Timeout -> {
                         _uiState.value = GeneratorUiState.Error("통신 시간 초과")
                         _receivedData.emit("TIMEOUT")
@@ -82,11 +86,11 @@ class HomeViewModel @Inject constructor(
                 result.fold(
                     onSuccess = {
                         _deviceStatus.value = DeviceStatus.Connected
-                        _uiState.value = GeneratorUiState.Success("장치에 연결되었습니다")
+                        _uiState.value = GeneratorUiState.Success("연결 성공")
                         _receivedData.emit("성공적으로 연결되었습니다")
 
-                        // 보드 버전 정보 요청
-                        requestBoardVersion()
+                        // 연결 성공 후 시스템 상태 요청
+                        requestSystemStatus()
                     },
                     onFailure = { e ->
                         _deviceStatus.value = DeviceStatus.Error
@@ -102,6 +106,29 @@ class HomeViewModel @Inject constructor(
                 _uiState.value = GeneratorUiState.Error("예외 발생: ${e.message}")
                 _receivedData.emit("예외 발생: ${e.message}")
                 Timber.e(e, "connectDevice() 메서드에서 예외 발생")
+            }
+        }
+    }
+
+    /**
+     * 시스템 상태 요청
+     */
+    private fun requestSystemStatus() {
+        viewModelScope.launch {
+            try {
+                _receivedData.emit("시스템 상태 요청 중...")
+
+                generatorRepository.requestSystemStatus()
+                    .onSuccess {
+                        _receivedData.emit("시스템 상태 요청 성공")
+                    }
+                    .onFailure { e ->
+                        _receivedData.emit("시스템 상태 요청 실패: ${e.message}")
+                        Timber.e(e, "시스템 상태 요청 중 오류 발생")
+                    }
+            } catch (e: Exception) {
+                _receivedData.emit("시스템 상태 요청 중 예외 발생: ${e.message}")
+                Timber.e(e, "requestSystemStatus() 메서드에서 예외 발생")
             }
         }
     }
@@ -253,7 +280,7 @@ class HomeViewModel @Inject constructor(
     fun requestPowerDiagnosis(type: Int = 0) {
         viewModelScope.launch {
             try {
-                val typeStr = when(type) {
+                val typeStr = when (type) {
                     0 -> "Power 3.3V"
                     1 -> "Power 5V"
                     2 -> "Power +12V"
@@ -293,7 +320,7 @@ class HomeViewModel @Inject constructor(
     fun requestBoardVersion(type: Int = 0) {
         viewModelScope.launch {
             try {
-                val typeStr = when(type) {
+                val typeStr = when (type) {
                     0 -> "Main Board App Version"
                     1 -> "AEC Board PCB Version"
                     2 -> "DC Link Board PCB Version"
@@ -334,9 +361,9 @@ class HomeViewModel @Inject constructor(
         when (response.actionCommand) {
             SerialCommand.Action.HeartBeat.value -> {
                 _deviceStatus.value = DeviceStatus.Connected
-                _uiState.value = GeneratorUiState.Success("하트비트 수신됨")
-
+                _uiState.value = GeneratorUiState.Idle("하트비트 수신됨")
             }
+
             SerialCommand.Action.ErrorCode.value -> {
                 if (response.data != null && response.data.size >= 2) {
                     val module = response.data[0].toInt() and 0xFF
@@ -346,10 +373,11 @@ class HomeViewModel @Inject constructor(
                     _uiState.value = GeneratorUiState.Error("알 수 없는 오류 발생")
                 }
             }
+
             SerialCommand.Action.SystemStatus.value -> {
                 if (response.data != null && response.data.isNotEmpty()) {
                     val status = response.data[0].toInt() and 0xFF
-                    val statusStr = when(status) {
+                    val statusStr = when (status) {
                         0x00 -> "NONE"
                         0x01 -> "BOOT"
                         0x02 -> "INIT"
@@ -367,9 +395,10 @@ class HomeViewModel @Inject constructor(
                         0x80 -> "ERROR"
                         else -> "UNKNOWN: 0x${status.toString(16)}"
                     }
-                    _uiState.value = GeneratorUiState.Success("시스템 상태: $statusStr")
+                    _uiState.value = GeneratorUiState.Idle("시스템 상태: $statusStr")
                 }
             }
+
             else -> {
                 _uiState.value = GeneratorUiState.Success("명령 실행 완료")
             }
@@ -411,12 +440,14 @@ class HomeViewModel @Inject constructor(
                             }
                         }
                     }
+
                     SerialCommand.Action.PowerDiagnosis.value -> {
                         if (response.data != null && response.data.size >= 3) {
                             val type = response.data[0].toInt() and 0xFF
-                            val value = ((response.data[1].toInt() and 0xFF) shl 8) or (response.data[2].toInt() and 0xFF)
+                            val value =
+                                ((response.data[1].toInt() and 0xFF) shl 8) or (response.data[2].toInt() and 0xFF)
 
-                            val typeStr = when(type) {
+                            val typeStr = when (type) {
                                 0 -> "전원 3.3V: ${value / 100.0}V"
                                 1 -> "전원 5V: ${value / 100.0}V"
                                 2 -> "전원 +12V: ${value / 100.0}V"
@@ -502,5 +533,4 @@ class HomeViewModel @Inject constructor(
         }
         return connected
     }
-
 }

@@ -8,10 +8,13 @@ import com.androidkotlin.generatorprokt.domain.model.SerialResponse
 import com.androidkotlin.generatorprokt.domain.repository.GeneratorRepository
 import com.androidkotlin.generatorprokt.domain.repository.Serial422Repository
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import javax.inject.Inject
@@ -26,6 +29,9 @@ class GeneratorRepositoryImpl @Inject constructor(
     // 현재 모드를 저장하는 StateFlow
     private val _currentMode = MutableStateFlow(MainMode.NONE)
 
+    // 리포지토리 자체적인 코루틴 스코프 생성
+    private val repositoryScope = CoroutineScope(SupervisorJob() + ioDispatcher)
+
     init {
         // 초기 상태 요청 및 Flow 수집 설정
         setupModeListener()
@@ -36,8 +42,8 @@ class GeneratorRepositoryImpl @Inject constructor(
      */
     private fun setupModeListener() {
         // 시리얼 응답 Flow를 수집하여 상태 변경 감지
-        serial422Repository.receiveData()
-            .collect { response ->
+        repositoryScope.launch {
+            serial422Repository.receiveData().collect { response ->
                 when (response) {
                     is SerialResponse.Success -> {
                         if (response.actionCommand == SerialCommand.Action.SystemStatus.value) {
@@ -50,6 +56,7 @@ class GeneratorRepositoryImpl @Inject constructor(
                     }
                 }
             }
+        }
     }
 
     /**

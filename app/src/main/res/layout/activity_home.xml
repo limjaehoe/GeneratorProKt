@@ -33,6 +33,58 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent" />
 
+        <!-- 발전기 상태 뷰 추가 -->
+        <TextView
+            android:id="@+id/tvMainModeTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="발전기 상태"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginTop="16dp"
+            app:layout_constraintTop_toBottomOf="@id/tvConnectionStatus"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <com.androidkotlin.generatorprokt.presentation.GeneratorStateView
+            android:id="@+id/generatorStateView"
+            android:layout_width="match_parent"
+            android:layout_height="200dp"
+            android:layout_marginTop="8dp"
+            app:layout_constraintTop_toBottomOf="@id/tvMainModeTitle" />
+
+        <!-- 모드 변경 버튼들 -->
+        <Button
+            android:id="@+id/btnStandbyMode"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="대기 모드"
+            android:layout_marginTop="8dp"
+            android:layout_marginEnd="4dp"
+            app:layout_constraintTop_toBottomOf="@id/generatorStateView"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/btnReadyMode" />
+
+        <Button
+            android:id="@+id/btnReadyMode"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="Ready 모드"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            app:layout_constraintTop_toTopOf="@id/btnStandbyMode"
+            app:layout_constraintStart_toEndOf="@id/btnStandbyMode"
+            app:layout_constraintEnd_toStartOf="@id/btnExposureMode" />
+
+        <Button
+            android:id="@+id/btnExposureMode"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="Exposure"
+            android:layout_marginStart="4dp"
+            app:layout_constraintTop_toTopOf="@id/btnStandbyMode"
+            app:layout_constraintStart_toEndOf="@id/btnReadyMode"
+            app:layout_constraintEnd_toEndOf="parent" />
+
         <!-- 기본 버튼 섹션 -->
         <TextView
             android:id="@+id/tvBasicControlTitle"
@@ -42,7 +94,7 @@
             android:textSize="18sp"
             android:textStyle="bold"
             android:layout_marginTop="24dp"
-            app:layout_constraintTop_toBottomOf="@id/tvConnectionStatus"
+            app:layout_constraintTop_toBottomOf="@id/btnStandbyMode"
             app:layout_constraintStart_toStartOf="parent" />
 
         <Button
@@ -329,8 +381,5 @@
                 android:textSize="12sp"
                 android:padding="8dp" />
         </androidx.core.widget.NestedScrollView>
-
-
-
     </androidx.constraintlayout.widget.ConstraintLayout>
 </ScrollView>

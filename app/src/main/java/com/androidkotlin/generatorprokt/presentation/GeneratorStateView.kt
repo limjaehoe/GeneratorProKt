@@ -8,6 +8,7 @@ import android.graphics.Rect
 import android.util.AttributeSet
 import android.view.View
 import com.androidkotlin.generatorprokt.domain.model.MainMode
+import timber.log.Timber
 
 /**
  * 발전기 상태(MAIN_MODE)를 시각적으로 보여주는 커스텀 뷰
@@ -29,6 +30,7 @@ class GeneratorStateView @JvmOverloads constructor(
     var currentMode: MainMode = MainMode.NONE
         set(value) {
             field = value
+            Timber.d("GeneratorStateView - 모드 변경: $value (${value.hexValue})")
             invalidate() // 상태가 변경되면 뷰 다시 그리기
         }
 
@@ -51,6 +53,9 @@ class GeneratorStateView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+
+        // 로그로 onDraw가 호출되었는지 확인
+        Timber.d("GeneratorStateView - onDraw 호출: 현재 모드 = $currentMode")
 
         // 배경 색상 설정
         val bgColor = modeColors[currentMode] ?: Color.GRAY
@@ -90,4 +95,6 @@ class GeneratorStateView @JvmOverloads constructor(
         val darkness = 1 - (0.299 * Color.red(color) + 0.587 * Color.green(color) + 0.114 * Color.blue(color)) / 255
         return darkness >= 0.5
     }
+
+
 }
