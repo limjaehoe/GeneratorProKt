@@ -1,19 +1,16 @@
-package com.androidkotlin.generatorprokt.presentation.main
+package com.androidkotlin.generatorprokt.presentation.main.activity
 
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.graphics.Color
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.text.method.ScrollingMovementMethod
 import android.util.Log
-import android.view.View
 import android.widget.Toast
 import android_serialport_api.SerialPortFinder
 import androidx.activity.viewModels
@@ -22,6 +19,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.androidkotlin.generatorprokt.databinding.ActivityHomeBinding
 import com.androidkotlin.generatorprokt.domain.model.MainMode
+import com.androidkotlin.generatorprokt.presentation.main.state.DeviceStatus
+import com.androidkotlin.generatorprokt.presentation.main.viewmodel.GeneratorStateViewModel
+import com.androidkotlin.generatorprokt.presentation.main.state.GeneratorUiState
+import com.androidkotlin.generatorprokt.presentation.main.viewmodel.HomeViewModel
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest

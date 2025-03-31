@@ -1,14 +1,15 @@
-package com.androidkotlin.generatorprokt.presentation.main
+package com.androidkotlin.generatorprokt.presentation.main.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.androidkotlin.generatorprokt.data.device.SerialPacketHandler
 import com.androidkotlin.generatorprokt.domain.model.SerialCommand
 import com.androidkotlin.generatorprokt.domain.model.SerialResponse
 import com.androidkotlin.generatorprokt.domain.repository.GeneratorRepository
 import com.androidkotlin.generatorprokt.domain.usecase.ConnectSerialUseCase
 import com.androidkotlin.generatorprokt.domain.usecase.ReceiveSerialDataUseCase
 import com.androidkotlin.generatorprokt.domain.usecase.SendGeneratorCommandUseCase
+import com.androidkotlin.generatorprokt.presentation.main.state.DeviceStatus
+import com.androidkotlin.generatorprokt.presentation.main.state.GeneratorUiState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow

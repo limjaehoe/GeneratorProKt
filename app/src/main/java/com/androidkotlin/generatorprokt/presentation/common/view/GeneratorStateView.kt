@@ -1,4 +1,4 @@
-package com.androidkotlin.generatorprokt.presentation
+package com.androidkotlin.generatorprokt.presentation.common.view
 
 import android.content.Context
 import android.graphics.Canvas

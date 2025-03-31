@@ -1,4 +1,4 @@
-package com.androidkotlin.generatorprokt.presentation.main
+package com.androidkotlin.generatorprokt.presentation.main.state
 
 /**
  * UI 상태를 나타내는 sealed class

@@ -1,4 +1,4 @@
-package com.androidkotlin.generatorprokt.presentation.main
+package com.androidkotlin.generatorprokt.presentation.main.state
 
 /**
  * 장치 연결 상태를 나타내는 enum 클래스

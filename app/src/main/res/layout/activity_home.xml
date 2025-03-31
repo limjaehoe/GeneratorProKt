@@ -45,7 +45,7 @@
             app:layout_constraintTop_toBottomOf="@id/tvConnectionStatus"
             app:layout_constraintStart_toStartOf="parent" />
 
-        <com.androidkotlin.generatorprokt.presentation.GeneratorStateView
+        <com.androidkotlin.generatorprokt.presentation.common.view.GeneratorStateView
             android:id="@+id/generatorStateView"
             android:layout_width="match_parent"
             android:layout_height="200dp"
