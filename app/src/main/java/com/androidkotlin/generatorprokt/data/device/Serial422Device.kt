@@ -47,7 +47,15 @@ class Serial422Device @Inject constructor(
 
             if (mSerialPort != null) {
                 isConnected = true
+
+                // 여기에 로그 추가
+                Timber.d("woghl1129: ReadThread 시작 전 상태 확인 - 연결됨=${isConnected}")
+
                 startReadThread()
+
+                // 여기에 로그 추가
+                Timber.d("woghl1129: ReadThread 시작 후 상태 확인 - thread=${readThread?.state}, 살아있음=${readThread?.isAlive}")
+
                 Timber.d("시리얼 포트 연결 성공")
                 return@withContext Result.success(Unit)
             } else {
@@ -176,8 +184,13 @@ class Serial422Device @Inject constructor(
      * 읽기 스레드 시작
      */
     private fun startReadThread() {
+        Timber.d("woghl1129: startReadThread() 호출됨 - 이전 스레드 상태=${readThread?.state}")
         readThread?.interrupt()
-        readThread = ReadThread().apply { start() }
+        readThread = ReadThread().apply {
+            Timber.d("woghl1129: 새 ReadThread 생성")
+            start()
+            Timber.d("woghl1129: ReadThread.start() 호출 완료")
+        }
     }
 
     /**
@@ -186,21 +199,24 @@ class Serial422Device @Inject constructor(
     private inner class ReadThread : Thread() {
         override fun run() {
             val buffer = ByteArray(1024)
+            Timber.d("woghl1129: ReadThread 시작됨")
 
             while (!isInterrupted && isConnected) {
                 try {
+                    Timber.v("woghl1129: 데이터 읽기 시도 중...")
                     val readBytes = mInputStream?.read(buffer) ?: 0
                     if (readBytes > 0) {
-                        Timber.d("데이터 수신: ${readBytes}바이트")
+                        Timber.d("woghl1129: 데이터 수신됨 - ${readBytes}바이트")
                         onDataReceived?.invoke(buffer, readBytes)
                     }
-                    SystemClock.sleep(10) // CPU 부하 감소
+                    SystemClock.sleep(10)
                 } catch (e: IOException) {
-                    Timber.e(e, "데이터 읽기 중 오류 발생")
+                    Timber.e(e, "woghl1129: 데이터 읽기 중 오류 발생")
                     isConnected = false
                     break
                 }
             }
+            Timber.d("woghl1129: ReadThread 종료됨")
         }
     }
 

@@ -10,11 +10,24 @@ import timber.log.Timber
  */
 class SerialPacketHandler {
 
+    // 모든 메서드가 companion object 내에 정의되어 있어,
+    // 인스턴스 생성 없이 사용 가능합니다.
     companion object {
         /**
          * 패킷을 바이트 배열로 직렬화
+         * SerialPacket 객체를 실제 바이트 배열로 변환
+         * 통신 프로토콜에 맞게 헤더, 명령어, 데이터, 체크섬, 종료 바이트 등을 포함한 패킷을 구성한다.
          */
         fun serializePacket(packet: SerialPacket): ByteArray {
+            // 패킷 구조 만들기
+            // 1. 프로토콜 헤더 설정 (0x23, 0x50)
+            // 2. 타겟 ID, 소스 ID 설정
+            // 3. 패킷 길이 설정
+            // 4. 명령어 설정 (Control, Action)
+            // 5. 데이터 복사
+            // 6. 체크섬 계산 및 설정
+            // 7. 종료 바이트 설정 (0x21)
+
             Timber.d("패킷 직렬화 시작: Control=${packet.controlCommand.value}, Action=${packet.actionCommand.value}")
             val dataLength = packet.data?.size ?: 0
             val totalLength = 10 + dataLength // 헤더(8) + 데이터 + 체크섬(1) + 종료(1)
@@ -57,8 +70,17 @@ class SerialPacketHandler {
 
         /**
          * 수신된 바이트 배열을 응답 객체로 파싱
+         * 수신된 바이트 배열을 SerialResponse 객체로 변환합니다.
+         * 패킷 형식 검증, 체크섬 확인, 데이터 추출 등의 작업을 수행합니다.
          */
         fun parseResponse(buffer: ByteArray, size: Int): SerialResponse {
+            // 1. 패킷 형식 검증
+            // 2. 패킷 길이 계산
+            // 3. 체크섬 검증
+            // 4. 명령어 추출
+            // 5. 데이터 추출
+            // 6. SerialResponse 객체 생성하여 반환
+
             Timber.d("응답 파싱 시작: ${size}바이트, 데이터: ${bytesToHexString(buffer.copyOf(size))}")
 
             // 패킷 유효성 검사
@@ -113,9 +135,22 @@ class SerialPacketHandler {
             )
         }
 
+
         /**
          * 응답 파싱 후 의미 있는 데이터로 해석
+         * 응답 패킷의 의미를 해석하여 사용 가능한 데이터로 변환합니다.
+         * 명령어 타입에 따라 시스템 상태, KV 값, mA 값, 시간 등 다양한 정보를 추출합니다.
          */
+        // 명령어 타입에 따라 다른 해석 로직 수행:
+        // - 시스템 상태
+        // - 하트비트
+        // - KV 피드백 값
+        // - mA 피드백 값
+        // - 시간 피드백 값
+        // - 오류 코드
+        // - 경고 코드
+        // - 전원 진단
+        // - 보드 버전 등
         fun interpretResponse(response: SerialResponse.Success): Any? {
             when (response.actionCommand) {
                 // 시스템 상태 응답
@@ -308,6 +343,7 @@ class SerialPacketHandler {
             return null
         }
 
+        // 유틸리티 메서드들
         /**
          * 바이트 배열을 16진수 문자열로 변환
          */

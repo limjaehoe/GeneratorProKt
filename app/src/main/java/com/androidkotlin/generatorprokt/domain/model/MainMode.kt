@@ -14,13 +14,11 @@ enum class MainMode(val hexValue: Int, val korDescription: String) {
     EXPOSURE(0x06, "Exposure 모드"),
     EXPOSURE_DONE(0x07, "Exposure 완료"),
     EXPOSURE_RELEASE(0x08, "모드"),
-    UNKNOWN_0x09(0x09, ""),  // 이미지에 설명이 없는 값
+
     RESET(0x0A, "재부팅 모드"),
-    UNKNOWN_0x0B(0x0B, ""),  // 이미지에 설명이 없는 값
-    SYNC(0x0C, ""),  // 이미지에 설명이 없는 값
-    TECHNICAL_MODE(0x0D, "테크니컬 모드\n: 개발 테스트 진행"),
-    UNKNOWN_0x0E(0x0E, ""),  // 이미지에 설명이 없는 값
-    RE_CONFIG(0x1F, ""),  // 이미지에 설명이 없는 값
+    //SYNC(0x0C, ""),
+    TECHNICAL_MODE(0x0D, "테크니컬 모드 : 개발 테스트 진행"),
+    //RE_CONFIG(0x1F, ""),
     EMERGENCY(0x40, "Emergency Button 눌러졌을경우 6번 Bit 1 설정, 해제시 STANDBY모드"),
     ERROR(0x80, "Error 시 7번 Bit 1설정, 해제시 STANDBY 모드");
 
