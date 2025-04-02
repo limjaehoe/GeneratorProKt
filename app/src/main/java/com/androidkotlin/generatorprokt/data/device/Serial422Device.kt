@@ -21,7 +21,7 @@ class Serial422Device @Inject constructor(
     companion object {
         private const val TAG = "Serial422Device"
         private const val SERIAL_BAUDRATE = 115200
-        private const val SERIAL_PORT_NAME = "ttyS3" // RS-485 포트
+        private const val SERIAL_PORT_NAME = "ttyS4" // RS-485 포트
     }
 
     private var mSerialPort: SerialPort? = null
@@ -102,8 +102,8 @@ class Serial422Device @Inject constructor(
         // 적합한 포트를 찾지 못한 경우 다른 일반적인 경로 시도
         if (mSerialPort == null) {
             val commonPaths = arrayOf(
-                "/dev/ttyS3", "/dev/ttyS2", "/dev/ttyS1", "/dev/ttyS0",
-                "/dev/ttyS4", "/dev/ttyUSB0", "/dev/ttyACM0"
+                "/dev/ttyS4", "/dev/ttyS2", "/dev/ttyS1", "/dev/ttyS0",
+                "/dev/ttyS3", "/dev/ttyUSB0", "/dev/ttyACM0"
             )
 
             for (path in commonPaths) {
@@ -199,24 +199,27 @@ class Serial422Device @Inject constructor(
     private inner class ReadThread : Thread() {
         override fun run() {
             val buffer = ByteArray(1024)
-            Timber.d("woghl1129: ReadThread 시작됨")
+            Timber.d("ReadThread 시작됨")
 
             while (!isInterrupted && isConnected) {
                 try {
-                    Timber.v("woghl1129: 데이터 읽기 시도 중...")
-                    val readBytes = mInputStream?.read(buffer) ?: 0
-                    if (readBytes > 0) {
-                        Timber.d("woghl1129: 데이터 수신됨 - ${readBytes}바이트")
-                        onDataReceived?.invoke(buffer, readBytes)
+                    // 데이터 가용성 확인
+                    if (mInputStream?.available() ?: 0 > 0) {
+                        val readBytes = mInputStream?.read(buffer) ?: 0
+                        if (readBytes > 0) {
+                            Timber.d("데이터 수신: ${readBytes}바이트")
+                            onDataReceived?.invoke(buffer, readBytes)
+                        }
+                    } else {
+                        // 데이터가 없으면 짧게 대기
+                        SystemClock.sleep(1)
                     }
-                    SystemClock.sleep(10)
                 } catch (e: IOException) {
-                    Timber.e(e, "woghl1129: 데이터 읽기 중 오류 발생")
+                    Timber.e(e, "데이터 읽기 중 오류 발생")
                     isConnected = false
                     break
                 }
             }
-            Timber.d("woghl1129: ReadThread 종료됨")
         }
     }
 
@@ -242,6 +245,8 @@ class Serial422Device @Inject constructor(
             Timber.e(e, "권한 설정 실패: $path")
         }
     }
+
+
 
 
 

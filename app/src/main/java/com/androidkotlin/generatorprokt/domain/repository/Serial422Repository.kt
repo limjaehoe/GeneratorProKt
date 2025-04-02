@@ -104,4 +104,11 @@ interface Serial422Repository {
      * @return 응답 결과
      */
     suspend fun requestBoardVersion(type: Int): Result<SerialResponse>
+
+    /**
+     * 시스템 상태 변경 명령 전송
+     * @param status 원하는 시스템 상태 코드 (예: 3 = MAIN_MODE_STANDBY)
+     * @return 응답 결과
+     */
+    suspend fun sendSystemStatus(status: Int): Result<SerialResponse>
 }

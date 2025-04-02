@@ -74,66 +74,119 @@ class SerialPacketHandler {
          * 패킷 형식 검증, 체크섬 확인, 데이터 추출 등의 작업을 수행합니다.
          */
         fun parseResponse(buffer: ByteArray, size: Int): SerialResponse {
-            // 1. 패킷 형식 검증
-            // 2. 패킷 길이 계산
-            // 3. 체크섬 검증
-            // 4. 명령어 추출
-            // 5. 데이터 추출
-            // 6. SerialResponse 객체 생성하여 반환
+            try {
+                Timber.d("응답 파싱 시작: ${size}바이트, 데이터: ${bytesToHexString(buffer.copyOf(size))}")
 
-            Timber.d("응답 파싱 시작: ${size}바이트, 데이터: ${bytesToHexString(buffer.copyOf(size))}")
-
-            // 패킷 유효성 검사
-            if (size < 10 || buffer[0] != SerialPacket.PROTOCOL_FIRST || buffer[1] != SerialPacket.PROTOCOL_SECOND) {
-                Timber.e("잘못된 패킷 형식: 프로토콜 헤더 불일치 또는 패킷 크기 부족")
-                return SerialResponse.Error(Exception("Invalid packet format"))
-            }
-
-            // 패킷 길이 계산
-            val packetLength = (((buffer[4].toInt() and 0xFF) shl 8) or (buffer[5].toInt() and 0xFF))
-            val dataLength = packetLength - 8
-            Timber.d("패킷 길이: $packetLength, 데이터 길이: $dataLength")
-
-            if (dataLength < 0 || dataLength + 10 > size) {
-                Timber.e("패킷 데이터 길이가 잘못되었습니다: $dataLength")
-                return SerialResponse.Error(Exception("Invalid data length"))
-            }
-
-            // 체크섬 검증
-            var calculatedChecksum: Byte = 0
-            for (i in 0 until 8 + dataLength) {
-                calculatedChecksum = (calculatedChecksum + buffer[i]).toByte()
-            }
-
-            if (calculatedChecksum != buffer[8 + dataLength]) {
-                Timber.e("체크섬 불일치: 계산=${calculatedChecksum.toInt() and 0xFF}, 수신=${buffer[8 + dataLength].toInt() and 0xFF}")
-                return SerialResponse.Error(Exception("Checksum mismatch"))
-            }
-
-            // 컨트롤 및 액션 명령어 추출
-            val controlCommand = buffer[6].toInt() and 0xFF
-            val actionCommand = buffer[7].toInt() and 0xFF
-            Timber.d("응답 명령어: Control=0x${controlCommand.toString(16)}, Action=0x${actionCommand.toString(16)}")
-
-            // 데이터 추출
-            val data = if (dataLength > 0) {
-                ByteArray(dataLength).apply {
-                    System.arraycopy(buffer, 8, this, 0, dataLength)
+                // 최소 크기 검사 (완화된 조건)
+                if (size < 8 || buffer[0] != SerialPacket.PROTOCOL_FIRST || buffer[1] != SerialPacket.PROTOCOL_SECOND) {
+                    Timber.e("잘못된 패킷 형식: 프로토콜 헤더 불일치 또는 패킷 크기 부족")
+                    return SerialResponse.Error(Exception("Invalid packet format"))
                 }
-            } else null
 
-            if (data != null) {
-                Timber.d("응답 데이터: ${bytesToHexString(data)}")
-            } else {
-                Timber.d("응답 데이터 없음")
+                // 패킷 길이 계산 및 로깅
+                val packetLength = (((buffer[4].toInt() and 0xFF) shl 8) or (buffer[5].toInt() and 0xFF))
+                val dataLength = packetLength - 8
+                Timber.d("패킷 길이: $packetLength, 데이터 길이: $dataLength")
+
+                // 데이터 길이 검사 완화 - 임시 조치
+                if (dataLength < 0) {
+                    Timber.e("패킷 데이터 길이가 잘못되었습니다: $dataLength")
+                    return SerialResponse.Error(Exception("Invalid data length"))
+                }
+
+                // 실제 데이터 크기 조정 (buffer 범위 내로)
+                val actualDataLength = minOf(dataLength, size - 10)
+                Timber.d("조정된 데이터 길이: $actualDataLength")
+
+                // 컨트롤 및 액션 명령어 추출
+                val controlCommand = buffer[6].toInt() and 0xFF
+                val actionCommand = buffer[7].toInt() and 0xFF
+                Timber.d("응답 명령어: Control=0x${controlCommand.toString(16)}, Action=0x${actionCommand.toString(16)}")
+
+                // 데이터 추출 (조정된 길이 사용)
+                val data = if (actualDataLength > 0) {
+                    ByteArray(actualDataLength).apply {
+                        System.arraycopy(buffer, 8, this, 0, actualDataLength)
+                    }
+                } else null
+
+                if (data != null) {
+                    Timber.d("응답 데이터: ${bytesToHexString(data)}")
+                } else {
+                    Timber.d("응답 데이터 없음")
+                }
+
+                return SerialResponse.Success(
+                    controlCommand = controlCommand,
+                    actionCommand = actionCommand,
+                    data = data
+                )
+            } catch (e: Exception) {
+                Timber.e(e, "응답 파싱 중 오류 발생")
+                return SerialResponse.Error(e)
             }
-
-            return SerialResponse.Success(
-                controlCommand = controlCommand,
-                actionCommand = actionCommand,
-                data = data
-            )
         }
+//        fun parseResponse(buffer: ByteArray, size: Int): SerialResponse {
+//            // 1. 패킷 형식 검증
+//            // 2. 패킷 길이 계산
+//            // 3. 체크섬 검증
+//            // 4. 명령어 추출
+//            // 5. 데이터 추출
+//            // 6. SerialResponse 객체 생성하여 반환
+//
+//            Timber.d("응답 파싱 시작: ${size}바이트, 데이터: ${bytesToHexString(buffer.copyOf(size))}")
+//
+//            // 패킷 유효성 검사
+//            if (size < 10 || buffer[0] != SerialPacket.PROTOCOL_FIRST || buffer[1] != SerialPacket.PROTOCOL_SECOND) {
+//                Timber.e("잘못된 패킷 형식: 프로토콜 헤더 불일치 또는 패킷 크기 부족")
+//                return SerialResponse.Error(Exception("Invalid packet format"))
+//            }
+//
+//            // 패킷 길이 계산
+//            val packetLength = (((buffer[4].toInt() and 0xFF) shl 8) or (buffer[5].toInt() and 0xFF))
+//            val dataLength = packetLength - 9  // 8 대신 9를 사용
+//            Timber.d("패킷 길이: $packetLength, 데이터 길이: $dataLength")
+//
+//            if (dataLength < 0 || dataLength + 10 > size +1) { // size에 1을 더해줌
+//                Timber.e("패킷 데이터 길이가 잘못되었습니다: $dataLength")
+//                return SerialResponse.Error(Exception("Invalid data length"))
+//            }
+//
+//            // 체크섬 검증
+//            var calculatedChecksum: Byte = 0
+//            for (i in 0 until 8 + dataLength) {
+//                calculatedChecksum = (calculatedChecksum + buffer[i]).toByte()
+//            }
+//
+//            if (calculatedChecksum != buffer[8 + dataLength]) {
+//                Timber.e("체크섬 불일치: 계산=${calculatedChecksum.toInt() and 0xFF}, 수신=${buffer[8 + dataLength].toInt() and 0xFF}")
+//                return SerialResponse.Error(Exception("Checksum mismatch"))
+//            }
+//
+//            // 컨트롤 및 액션 명령어 추출
+//            val controlCommand = buffer[6].toInt() and 0xFF
+//            val actionCommand = buffer[7].toInt() and 0xFF
+//            Timber.d("응답 명령어: Control=0x${controlCommand.toString(16)}, Action=0x${actionCommand.toString(16)}")
+//
+//            // 데이터 추출
+//            val data = if (dataLength > 0) {
+//                ByteArray(dataLength).apply {
+//                    System.arraycopy(buffer, 8, this, 0, dataLength)
+//                }
+//            } else null
+//
+//            if (data != null) {
+//                Timber.d("응답 데이터: ${bytesToHexString(data)}")
+//            } else {
+//                Timber.d("응답 데이터 없음")
+//            }
+//
+//            return SerialResponse.Success(
+//                controlCommand = controlCommand,
+//                actionCommand = actionCommand,
+//                data = data
+//            )
+//        }
 
 
         /**

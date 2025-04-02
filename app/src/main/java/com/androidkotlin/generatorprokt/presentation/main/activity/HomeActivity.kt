@@ -8,8 +8,6 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import android_serialport_api.SerialPortFinder
@@ -17,6 +15,7 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.androidkotlin.generatorprokt.R
 import com.androidkotlin.generatorprokt.databinding.ActivityHomeBinding
 import com.androidkotlin.generatorprokt.domain.model.MainMode
 import com.androidkotlin.generatorprokt.presentation.main.state.DeviceStatus
@@ -24,7 +23,6 @@ import com.androidkotlin.generatorprokt.presentation.main.viewmodel.GeneratorSta
 import com.androidkotlin.generatorprokt.presentation.main.state.GeneratorUiState
 import com.androidkotlin.generatorprokt.presentation.main.viewmodel.HomeViewModel
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import timber.log.Timber
@@ -34,12 +32,12 @@ class HomeActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityHomeBinding
     private val viewModel: HomeViewModel by viewModels()
-    private val generatorStateViewModel: GeneratorStateViewModel by viewModels() // 추가
+    private val generatorStateViewModel: GeneratorStateViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityHomeBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+        setContentView(binding.getRoot())
 
         // USB 권한 요청 인텐트 필터 및 레시버 등록
         setupUsbPermissionIntentFilter()
@@ -47,7 +45,11 @@ class HomeActivity : AppCompatActivity() {
         setupUI()
         observeViewModel()
 
+        // 시리얼 포트 확인 (디버깅용)
+        checkSerialPorts()
+    }
 
+    private fun checkSerialPorts() {
         val portFinder = SerialPortFinder()
         val devices = portFinder.allDevices
         val paths = portFinder.allDevicesPath
@@ -62,8 +64,10 @@ class HomeActivity : AppCompatActivity() {
         // ttyS3 포트가 있는지 특별히 확인
         val hasTtyS3 = paths.any { it.contains("ttyS3") }
         Log.e("SERIAL_TEST", "ttyS3 포트 발견됨: $hasTtyS3")
-        Toast.makeText(this, "ttyS3 포트 발견됨: $hasTtyS3", Toast.LENGTH_LONG).show()
+        val hasTtyS4 = paths.any { it.contains("ttyS4") }
+        Log.e("SERIAL_TEST", "ttyS4 포트 발견됨: $hasTtyS4")
 
+        //Toast.makeText(this, "ttyS3 포트 발견됨: $hasTtyS3", Toast.LENGTH_LONG).show()
     }
 
     // USB 권한 요청에 필요한 인텐트 필터 설정
@@ -99,6 +103,8 @@ class HomeActivity : AppCompatActivity() {
                     device?.let {
                         Timber.d("USB 장치가 연결되었습니다: ${it.deviceName}")
                         binding.tvStatus.text = "USB 장치가 연결되었습니다: ${it.deviceName}"
+                        // 연결 시 자동으로 연결 시도
+                        viewModel.connectDevice()
                     }
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
@@ -119,45 +125,6 @@ class HomeActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
-
-        // 발전기 상태 모드 변경 버튼
-        binding.btnStandbyMode.setOnClickListener {
-            // 일반 Log 추가
-            Log.d("HomeActivity", "대기 모드 버튼 클릭됨")
-            Timber.d("대기 모드 버튼 클릭됨")
-            Toast.makeText(this, "대기 모드 버튼 클릭됨", Toast.LENGTH_SHORT).show()
-            generatorStateViewModel.setStandbyMode()
-
-            // 직접 테스트
-            Handler(Looper.getMainLooper()).postDelayed({
-                binding.generatorStateView.currentMode = MainMode.STANDBY
-                binding.generatorStateView.postInvalidate()
-                Log.d("HomeActivity", "직접 모드 변경 시도")
-            }, 500)
-        }
-
-        binding.btnReadyMode.setOnClickListener {
-            // 로그 추가
-            Timber.d("Ready 모드 버튼 클릭됨")
-            generatorStateViewModel.setReadyMode()
-
-            Handler(Looper.getMainLooper()).postDelayed({
-                binding.generatorStateView.currentMode = MainMode.EXPOSURE_READY
-                binding.generatorStateView.postInvalidate()
-            }, 500)
-        }
-
-        binding.btnExposureMode.setOnClickListener {
-            // 로그 추가
-            Timber.d("Exposure 모드 버튼 클릭됨")
-            generatorStateViewModel.setExposureMode()
-
-            Handler(Looper.getMainLooper()).postDelayed({
-                binding.generatorStateView.currentMode = MainMode.EXPOSURE
-                binding.generatorStateView.postInvalidate()
-            }, 500)
-        }
-
         // 기본 버튼 설정
         binding.btnConnect.setOnClickListener {
             Timber.d("연결 버튼이 클릭되었습니다")
@@ -243,50 +210,126 @@ class HomeActivity : AppCompatActivity() {
         // 포커스 설정
         binding.btnSetFocus.setOnClickListener {
             val smallFocus = binding.rbFocusSmall.isChecked
-            val focusStr = if (smallFocus) "Small" else "Large"
-            binding.tvStatus.text = "포커스 설정 중: $focusStr..."
-            viewModel.setFocus(smallFocus)
+            Timber.d("포커스 설정: ${if (smallFocus) "Small" else "Large"}")
+            generatorStateViewModel.setFocus(smallFocus)
+        }
+
+        // Ready 버튼
+        binding.btnReady.setOnClickListener {
+            try {
+                // 필수 값 확인
+                if (binding.etKvValue.text.isEmpty() || binding.etMaValue.text.isEmpty() || binding.etTimeValue.text.isEmpty()) {
+                    binding.tvStatus.text = "조사 조건을 모두 입력해 주세요"
+                    return@setOnClickListener
+                }
+
+                // 값 추출
+                val kv = binding.etKvValue.text.toString().toDouble() / 10 // 예: 40 -> 4.0kV
+                val mA = binding.etMaValue.text.toString().toDouble() / 10 // 예: 10 -> 1.0mA
+                val ms = binding.etTimeValue.text.toString().toDouble()
+                val focus = if (binding.rbFocusSmall.isChecked) 1 else 0
+
+                // Ready 명령 전송
+                generatorStateViewModel.setReadySwitch(kv, mA, ms, focus)
+                binding.tvStatus.text = "Ready 명령 전송됨"
+            } catch (e: Exception) {
+                binding.tvStatus.text = "오류: ${e.message}"
+                Timber.e(e, "Ready 설정 중 오류 발생")
+            }
+        }
+
+        // Expose 버튼
+        binding.btnExpose.setOnClickListener {
+            generatorStateViewModel.setExpose(true)
+            binding.tvStatus.text = "Expose 명령 전송됨"
         }
 
         // 로그 지우기 버튼
         binding.btnClearLog.setOnClickListener {
             binding.tvResponseData.text = ""
         }
-
     }
 
     private fun observeViewModel() {
-//        lifecycleScope.launch {
-//            viewModel.uiState.collectLatest { state ->
-//                when (state) {
-//                    is GeneratorUiState.Idle -> {
-//                        binding.tvStatus.text = "대기 중"
-//                        Timber.d("UI 상태: 대기 중")
-//                    }
-//                    is GeneratorUiState.Loading -> {
-//                        binding.tvStatus.text = "로딩 중..."
-//                        Timber.d("UI 상태: 로딩 중...")
-//                    }
-//                    is GeneratorUiState.Success -> {
-//                        binding.tvStatus.text = state.message
-//                        Timber.d("UI 상태: 성공 - ${state.message}")
-//                    }
-//                    is GeneratorUiState.Error -> {
-//                        binding.tvStatus.text = "오류: ${state.message}"
-//                        Timber.e("UI 상태: 오류 - ${state.message}")
-//                    }
-//                    is GeneratorUiState.Ready -> {
-//                        binding.tvStatus.text = state.message
-//                        Timber.d("UI 상태: 준비됨 - ${state.message}")
-//                    }
-//                    is GeneratorUiState.Exposing -> {
-//                        binding.tvStatus.text = state.message
-//                        Timber.d("UI 상태: 노출 중 - ${state.message}")
-//                    }
-//                }
-//            }
-//        }
+        // 발전기 상태 관찰
+        lifecycleScope.launch {
+            generatorStateViewModel.currentMode.collectLatest { mode ->
+                // GeneratorStateView 업데이트
+                binding.generatorStateView.currentMode = mode
+                binding.generatorStateView.invalidate() // 명시적 갱신 추가
 
+                // 로그 출력
+                Timber.d("발전기 상태 변경: ${mode.name} (0x${mode.hexValue.toString(16)})")
+
+                // 상태에 따른 버튼 활성화/비활성화
+                updateUIBasedOnMode(mode)
+            }
+        }
+
+        // 피드백 값 관찰
+        lifecycleScope.launch {
+            generatorStateViewModel.kvFeedback.collectLatest { value ->
+                value?.let {
+                    binding.tvStatus.text = "kV 피드백: $it kV"
+                }
+            }
+        }
+
+        lifecycleScope.launch {
+            generatorStateViewModel.maFeedback.collectLatest { value ->
+                value?.let {
+                    // 이미 다른 상태 메시지가 있을 수 있으므로 추가만 함
+                    val currentText = binding.tvStatus.text.toString()
+                    if (!currentText.contains("mA 피드백")) {
+                        binding.tvStatus.text = "$currentText | mA 피드백: $it mA"
+                    }
+                }
+            }
+        }
+
+        lifecycleScope.launch {
+            generatorStateViewModel.timeFeedback.collectLatest { value ->
+                value?.let {
+                    // 로그에만 출력
+                    Timber.d("시간 피드백: $it ms")
+                }
+            }
+        }
+
+        // 오류 코드 관찰
+        lifecycleScope.launch {
+            generatorStateViewModel.errorCode.collectLatest { errorCode ->
+                errorCode?.let {
+                    showErrorDialog("오류 발생: 코드 $it")
+                }
+            }
+        }
+
+        // 경고 코드 관찰
+        lifecycleScope.launch {
+            generatorStateViewModel.warningCode.collectLatest { warningCode ->
+                warningCode?.let {
+                    binding.tvStatus.text = "경고 발생: 코드 $it"
+                }
+            }
+        }
+
+        // Ready 스위치 상태 관찰
+        lifecycleScope.launch {
+            generatorStateViewModel.readySwitch.collectLatest { readyStatus ->
+                readyStatus?.let {
+                    if (it == 1) {
+                        binding.tvStatus.text = "Ready 상태: ON"
+                        binding.btnExpose.isEnabled = true
+                    } else {
+                        binding.tvStatus.text = "Ready 상태: OFF"
+                        binding.btnExpose.isEnabled = false
+                    }
+                }
+            }
+        }
+
+        // UI 상태 관찰
         lifecycleScope.launch {
             generatorStateViewModel.uiState.collectLatest { state ->
                 when (state) {
@@ -316,17 +359,12 @@ class HomeActivity : AppCompatActivity() {
                     is GeneratorUiState.Success -> {
                         binding.tvStatus.text = state.message
                         binding.tvStatus.setTextColor(getColor(android.R.color.holo_blue_dark))
-
-                        // 성공 메시지는 3초 후 원래 상태로 돌아가게 함
-                        lifecycleScope.launch {
-                            delay(3000)
-                            binding.tvStatus.setTextColor(getColor(android.R.color.black))
-                        }
                     }
                 }
             }
         }
 
+        // 장치 상태 관찰
         lifecycleScope.launch {
             viewModel.deviceStatus.collectLatest { status ->
                 when (status) {
@@ -344,6 +382,8 @@ class HomeActivity : AppCompatActivity() {
                         binding.btnSetMa.isEnabled = false
                         binding.btnSetTime.isEnabled = false
                         binding.btnSetFocus.isEnabled = false
+                        binding.btnReady.isEnabled = false
+                        binding.btnExpose.isEnabled = false
                     }
                     DeviceStatus.Connected -> {
                         binding.tvConnectionStatus.text = "연결됨"
@@ -359,6 +399,11 @@ class HomeActivity : AppCompatActivity() {
                         binding.btnSetMa.isEnabled = true
                         binding.btnSetTime.isEnabled = true
                         binding.btnSetFocus.isEnabled = true
+                        binding.btnReady.isEnabled = true
+                        binding.btnExpose.isEnabled = false // 초기에는 비활성화
+
+                        // 연결 후 시스템 상태 요청
+                        generatorStateViewModel.requestSystemStatus()
                     }
                     DeviceStatus.Error -> {
                         binding.tvConnectionStatus.text = "오류"
@@ -374,50 +419,17 @@ class HomeActivity : AppCompatActivity() {
                         binding.btnSetMa.isEnabled = false
                         binding.btnSetTime.isEnabled = false
                         binding.btnSetFocus.isEnabled = false
+                        binding.btnReady.isEnabled = false
+                        binding.btnExpose.isEnabled = false
                     }
                 }
             }
         }
 
-
-
-        // generatorStateViewModel 관찰 코드 추가
-        lifecycleScope.launch {
-            generatorStateViewModel.currentMode.collectLatest { mode ->
-                // GeneratorStateView 업데이트
-                binding.generatorStateView.currentMode = mode
-                binding.generatorStateView.invalidate() // 명시적 갱신 추가
-
-                // 로그 출력
-                Timber.d("발전기 상태 변경: ${mode.name} (0x${mode.hexValue.toString(16)})")
-
-                // 상태에 따른 버튼 활성화/비활성화
-                updateUIBasedOnMode(mode)
-            }
-        }
-
-
+        // 로그 메시지 관찰
         lifecycleScope.launch {
             viewModel.receivedData.collectLatest { logMessage ->
-                val currentLog = binding.tvResponseData.text.toString()
-                val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
-                val newLog = if (currentLog.isEmpty()) {
-                    "[$timestamp] $logMessage"
-                } else {
-                    "$currentLog\n[$timestamp] $logMessage"
-                }
-                binding.tvResponseData.text = newLog
-
-                // 로그가 너무 길어지면 오래된 내용 삭제
-                if (binding.tvResponseData.lineCount > 100) {
-                    val lines = newLog.split('\n')
-                    binding.tvResponseData.text = lines.takeLast(50).joinToString("\n")
-                }
-
-                // 자동 스크롤
-                binding.tvResponseData.post {
-                    (binding.tvResponseData.parent as androidx.core.widget.NestedScrollView).fullScroll(androidx.core.widget.NestedScrollView.FOCUS_DOWN)
-                }
+                addLogMessage(logMessage)
             }
         }
     }
@@ -426,17 +438,31 @@ class HomeActivity : AppCompatActivity() {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        // USB 장치 리시버 등록 해제
-        try {
-            unregisterReceiver(usbDeviceReceiver)
-            Timber.d("USB 장치 이벤트 리시버가 등록 해제되었습니다")
-        } catch (e: Exception) {
-            Timber.e(e, "USB 장치 이벤트 리시버 등록 해제 중 오류 발생")
+    private fun addLogMessage(logMessage: String) {
+        val currentLog = binding.tvResponseData.text.toString()
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
+        val newLog = if (currentLog.isEmpty()) {
+            "[$timestamp] $logMessage"
+        } else {
+            "$currentLog\n[$timestamp] $logMessage"
+        }
+        binding.tvResponseData.text = newLog
+
+        // 로그가 너무 길어지면 오래된 내용 삭제
+        if (binding.tvResponseData.lineCount > 100) {
+            val lines = newLog.split('\n')
+            binding.tvResponseData.text = lines.takeLast(50).joinToString("\n")
+        }
+
+        // 자동 스크롤
+        binding.tvResponseData.post {
+            (binding.tvResponseData.parent as androidx.core.widget.NestedScrollView).fullScroll(androidx.core.widget.NestedScrollView.FOCUS_DOWN)
         }
     }
 
+    /**
+     * 모드에 따른 UI 업데이트
+     */
     private fun updateUIBasedOnMode(mode: MainMode) {
         when (mode) {
             MainMode.EXPOSURE, MainMode.EXPOSURE_READY, MainMode.EXPOSURE_READY_DONE -> {
@@ -446,12 +472,15 @@ class HomeActivity : AppCompatActivity() {
                 binding.btnSetTime.isEnabled = false
                 binding.btnSetFocus.isEnabled = false
 
-                // Exposure 버튼 활성화
-                binding.btnExpose.isEnabled = true
+                // Exposure 버튼 활성화 (READY_DONE 상태일 때만)
+                binding.btnExpose.isEnabled = mode == MainMode.EXPOSURE_READY_DONE
 
-                // Ready, Exposure 버튼 강조 표시
-                binding.btnReadyMode.alpha = if (mode == MainMode.EXPOSURE_READY || mode == MainMode.EXPOSURE_READY_DONE) 0.7f else 1.0f
-                binding.btnExposureMode.alpha = if (mode == MainMode.EXPOSURE) 0.7f else 1.0f
+                // 로그 추가
+                if (mode == MainMode.EXPOSURE_READY_DONE) {
+                    addLogMessage("Ready 완료: 조사 가능 상태")
+                } else if (mode == MainMode.EXPOSURE) {
+                    addLogMessage("조사 중...")
+                }
             }
             MainMode.STANDBY -> {
                 // 대기 모드일 때는 모든 설정 버튼 활성화
@@ -463,10 +492,8 @@ class HomeActivity : AppCompatActivity() {
                 // Exposure 버튼 비활성화
                 binding.btnExpose.isEnabled = false
 
-                // 대기 모드 버튼 강조 표시
-                binding.btnStandbyMode.alpha = 0.7f
-                binding.btnReadyMode.alpha = 1.0f
-                binding.btnExposureMode.alpha = 1.0f
+                // 로그 추가
+                addLogMessage("대기 모드 진입")
             }
             MainMode.ERROR, MainMode.EMERGENCY -> {
                 // 오류 상태일 때는 모든 버튼 비활성화
@@ -476,14 +503,12 @@ class HomeActivity : AppCompatActivity() {
                 binding.btnSetFocus.isEnabled = false
                 binding.btnExpose.isEnabled = false
 
-                // 모든 버튼 정상 표시
-                binding.btnStandbyMode.alpha = 1.0f
-                binding.btnReadyMode.alpha = 1.0f
-                binding.btnExposureMode.alpha = 1.0f
-
                 // 오류 메시지 표시
                 val errorMessage = if (mode == MainMode.ERROR) "시스템 오류 발생" else "긴급 정지 상태"
                 showErrorDialog(errorMessage)
+
+                // 로그 추가
+                addLogMessage("오류 발생: $errorMessage")
             }
             else -> {
                 // 기타 모드에서는 기본 상태로 설정
@@ -492,11 +517,6 @@ class HomeActivity : AppCompatActivity() {
                 binding.btnSetTime.isEnabled = true
                 binding.btnSetFocus.isEnabled = true
                 binding.btnExpose.isEnabled = false
-
-                // 모든 버튼 정상 표시
-                binding.btnStandbyMode.alpha = 1.0f
-                binding.btnReadyMode.alpha = 1.0f
-                binding.btnExposureMode.alpha = 1.0f
             }
         }
     }
@@ -507,5 +527,16 @@ class HomeActivity : AppCompatActivity() {
             .setMessage(message)
             .setPositiveButton("확인", null)
             .show()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // USB 장치 리시버 등록 해제
+        try {
+            unregisterReceiver(usbDeviceReceiver)
+            Timber.d("USB 장치 이벤트 리시버가 등록 해제되었습니다")
+        } catch (e: Exception) {
+            Timber.e(e, "USB 장치 이벤트 리시버 등록 해제 중 오류 발생")
+        }
     }
 }

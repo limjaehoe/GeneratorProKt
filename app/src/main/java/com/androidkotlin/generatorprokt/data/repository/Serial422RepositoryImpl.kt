@@ -8,6 +8,7 @@ import com.androidkotlin.generatorprokt.domain.model.SerialResponse
 import com.androidkotlin.generatorprokt.domain.repository.Serial422Repository
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
@@ -25,12 +26,12 @@ class Serial422RepositoryImpl @Inject constructor(
     private val responseFlow = callbackFlow {
         Timber.d("응답 처리 콜백 플로우 초기화")
 
-        //Timber.d("woghl1129:"+serial422Device.onDataReceived)
+        Timber.d("woghl1129:"+serial422Device.onDataReceived)
         serial422Device.onDataReceived = { buffer, size ->
             try {
                 Timber.d("${size}바이트 데이터 수신됨")
                 val response = SerialPacketHandler.parseResponse(buffer, size)
-                //Timber.d("woghl1129:"+response.toString())
+                Timber.d("woghl1129:"+response.toString())
 
                 when (response) {
                     is SerialResponse.Success -> {
@@ -156,32 +157,32 @@ class Serial422RepositoryImpl @Inject constructor(
         return connected
     }
 
-    /**
-     * 초기화 요청 패킷 전송
-     */
-    private suspend fun sendInitialRequest() {
-        try {
-            Timber.d("초기화 요청 전송 중...")
-
-            val packet = SerialPacket(
-                controlCommand = SerialCommand.Control.CommGetInfo,
-                actionCommand = SerialCommand.Action.InitialReq,
-                data = null,
-                targetId = SerialPacket.TARGET_MAIN,    // 0x24
-                sourceId = SerialPacket.SOURCE_CONSOLE  // 0x25
-            )
-
-            val result = sendPacket(packet)
-
-            if (result.isSuccess) {
-                Timber.d("초기화 요청 전송 성공")
-            } else {
-                Timber.e("초기화 요청 전송 실패")
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "초기화 요청 전송 중 예외 발생")
-        }
-    }
+//    /**
+//     * 초기화 요청 패킷 전송
+//     */
+//    private suspend fun sendInitialRequest() {
+//        try {
+//            Timber.d("초기화 요청 전송 중...")
+//
+//            val packet = SerialPacket(
+//                controlCommand = SerialCommand.Control.CommGetInfo,
+//                actionCommand = SerialCommand.Action.InitialReq,
+//                data = null,
+//                targetId = SerialPacket.TARGET_MAIN,    // 0x24
+//                sourceId = SerialPacket.SOURCE_CONSOLE  // 0x25
+//            )
+//
+//            val result = sendPacket(packet)
+//
+//            if (result.isSuccess) {
+//                Timber.d("초기화 요청 전송 성공")
+//            } else {
+//                Timber.e("초기화 요청 전송 실패")
+//            }
+//        } catch (e: Exception) {
+//            Timber.e(e, "초기화 요청 전송 중 예외 발생")
+//        }
+//    }
 
     /**
      * 하트비트 패킷 전송
@@ -499,11 +500,36 @@ class Serial422RepositoryImpl @Inject constructor(
         }
     }
 
+//    /**
+//     * 시스템 상태 변경 명령 전송
+//     * @param status 원하는 시스템 상태 코드 (예: 4 = MAIN_MODE_EXPOSURE_READY)
+//     */
+//    suspend fun sendSystemStatus(status: Int): Result<SerialResponse> {
+//        try {
+//            Timber.d("시스템 상태 변경 명령 전송: $status")
+//
+//            val data = SerialPacketHandler.createUCharData(status)
+//
+//            val packet = SerialPacket(
+//                controlCommand = SerialCommand.Control.CommStatusInfo,
+//                actionCommand = SerialCommand.Action.SystemStatus,
+//                data = data,
+//                targetId = SerialPacket.TARGET_MAIN,
+//                sourceId = SerialPacket.SOURCE_CONSOLE
+//            )
+//
+//            return sendPacket(packet)
+//        } catch (e: Exception) {
+//            Timber.e(e, "시스템 상태 변경 명령 전송 중 예외 발생")
+//            return Result.failure(e)
+//        }
+//    }
+
     /**
      * 시스템 상태 변경 명령 전송
-     * @param status 원하는 시스템 상태 코드 (예: 4 = MAIN_MODE_EXPOSURE_READY)
+     * @param status 원하는 시스템 상태 코드 (예: 3 = MAIN_MODE_STANDBY)
      */
-    suspend fun sendSystemStatus(status: Int): Result<SerialResponse> {
+    override suspend fun sendSystemStatus(status: Int): Result<SerialResponse> {
         try {
             Timber.d("시스템 상태 변경 명령 전송: $status")
 
@@ -523,4 +549,522 @@ class Serial422RepositoryImpl @Inject constructor(
             return Result.failure(e)
         }
     }
+
+
+
+    private suspend fun sendInitialRequest() {
+        try {
+            Timber.d("초기화 요청 전송 중...")
+
+            // 1. 먼저 초기화 요청 패킷 전송
+            val initPacket = SerialPacket(
+                controlCommand = SerialCommand.Control.CommGetInfo,
+                actionCommand = SerialCommand.Action.InitialReq,
+                data = null,
+                targetId = SerialPacket.TARGET_MAIN,
+                sourceId = SerialPacket.SOURCE_CONSOLE
+            )
+            sendPacket(initPacket)
+
+            // 2. 일정 시간 대기 (200ms)
+            delay(200)
+
+            // 3. 초기화에 필요한 다양한 설정값 순차적으로 전송
+            sendCapbankSettings()
+            sendTimeSettings()
+            sendRotorSettings()
+            sendBuckySettings()
+            sendInterlockSettings()
+            sendFilamentSettings()
+            sendAECSettings()
+            sendFocusSettings()
+
+            Timber.d("초기화 시퀀스 전송 완료")
+        } catch (e: Exception) {
+            Timber.e(e, "초기화 요청 전송 중 예외 발생")
+        }
+    }
+
+    // Capbank 설정 전송
+    private suspend fun sendCapbankSettings() {
+        Timber.d("Capbank 설정 전송 중...")
+
+        // CAPBANK_CHARGE_TIME 설정 패킷
+        val capChargeTimePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.CapbankChargeTime,
+            data = SerialPacketHandler.createUShortData(10),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(capChargeTimePacket)
+        delay(50)
+
+        // CAPBANK_CHARGE_TIMEOUT 설정 패킷
+        val capChargeTimeoutPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.CapbankChargeTimeout,
+            data = SerialPacketHandler.createUShortData(2),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(capChargeTimeoutPacket)
+        delay(50)
+
+        // CAPBANK_LEVEL_MIN 설정 패킷
+        val capLevelMinPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.CapbankLevelMin,
+            data = SerialPacketHandler.createUShortData(190),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(capLevelMinPacket)
+        delay(50)
+
+        // CAPBANK_LEVEL_MAX 설정 패킷
+        val capLevelMaxPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.CapbankLevelMax,
+            data = SerialPacketHandler.createUShortData(340),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(capLevelMaxPacket)
+        delay(50)
+
+        // INPUT_SOURCE_PHASE 설정 패킷
+        val inputSourcePhasePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.InputSourcePhase,
+            data = SerialPacketHandler.createUCharData(0), // 0: Single Phase
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(inputSourcePhasePacket)
+        delay(50)
+    }
+
+    // Time 설정 전송
+    private suspend fun sendTimeSettings() {
+        Timber.d("Time 설정 전송 중...")
+
+        // TIME_MIN 설정 패킷
+        val timeMinPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.TimeMin,
+            data = SerialPacketHandler.createUShortData(5),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(timeMinPacket)
+        delay(50)
+
+        // TIME_MAX 설정 패킷
+        val timeMaxPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.TimeMax,
+            data = SerialPacketHandler.createUShortData(5000),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(timeMaxPacket)
+        delay(50)
+    }
+
+    // Rotor 설정 전송
+    private suspend fun sendRotorSettings() {
+        Timber.d("Rotor 설정 전송 중...")
+
+        // ROTOR_STARTING_CURRENT_MIN 설정 패킷
+        val rotorStartingCurrentMinPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.RotorStartingCurrentMin,
+            data = SerialPacketHandler.createUShortData(500),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(rotorStartingCurrentMinPacket)
+        delay(50)
+
+        // ROTOR_STARTING_CURRENT_MAX 설정 패킷
+        val rotorStartingCurrentMaxPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.RotorStartingCurrentMax,
+            data = SerialPacketHandler.createUShortData(750),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(rotorStartingCurrentMaxPacket)
+        delay(50)
+
+        // ROTOR_STARTING_TIME 설정 패킷
+        val rotorStartingTimePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.RotorStartingTime,
+            data = SerialPacketHandler.createUShortData(1500),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(rotorStartingTimePacket)
+        delay(50)
+
+        // ROTOR_RUNNING_CURRENT_MIN 설정 패킷
+        val rotorRunningCurrentMinPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.RotorRunningCurrentMin,
+            data = SerialPacketHandler.createUShortData(100),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(rotorRunningCurrentMinPacket)
+        delay(50)
+
+        // ROTOR_RUNNING_CURRENT_MAX 설정 패킷
+        val rotorRunningCurrentMaxPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.RotorRunningCurrentMax,
+            data = SerialPacketHandler.createUShortData(200),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(rotorRunningCurrentMaxPacket)
+        delay(50)
+
+        // ROTOR_RUNNING_TIME 설정 패킷
+        val rotorRunningTimePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.RotorRunningTime,
+            data = SerialPacketHandler.createUShortData(10000),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(rotorRunningTimePacket)
+        delay(50)
+
+        // ROTOR_PHASE_OFFSET_VALUE 설정 패킷
+        val rotorPhaseOffsetValuePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.RotorPhaseOffsetValue,
+            data = SerialPacketHandler.createUCharData(85),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(rotorPhaseOffsetValuePacket)
+        delay(50)
+    }
+
+    // Bucky 설정 전송
+    private suspend fun sendBuckySettings() {
+        Timber.d("Bucky 설정 전송 중...")
+
+        // GRID_DELAY_TIME 설정 패킷
+        val gridDelayTimePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.GridDelayTime,
+            data = SerialPacketHandler.createUShortData(60),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(gridDelayTimePacket)
+        delay(50)
+
+        // BUCKY_1_DETECTOR_TYPE 설정 패킷
+        val bucky1DetectorTypePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.Bucky1DetectorType,
+            data = SerialPacketHandler.createUCharData(0),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(bucky1DetectorTypePacket)
+        delay(50)
+
+        // GRID_1_TYPE 설정 패킷
+        val grid1TypePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.Bucky1GridType,
+            data = SerialPacketHandler.createUCharData(2),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(grid1TypePacket)
+        delay(50)
+
+        // BUCKY_2_DETECTOR_TYPE 설정 패킷
+        val bucky2DetectorTypePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.Bucky2DetectorType,
+            data = SerialPacketHandler.createUCharData(0),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(bucky2DetectorTypePacket)
+        delay(50)
+
+        // GRID_2_TYPE 설정 패킷
+        val grid2TypePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.Bucky2GridType,
+            data = SerialPacketHandler.createUCharData(2),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(grid2TypePacket)
+        delay(50)
+
+        // BK1_FB 설정 패킷
+        val bk1FbPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.Bk1Fb,
+            data = SerialPacketHandler.createUCharData(0),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(bk1FbPacket)
+        delay(50)
+
+        // BK2_FB 설정 패킷
+        val bk2FbPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.Bk2Fb,
+            data = SerialPacketHandler.createUCharData(0),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(bk2FbPacket)
+        delay(50)
+    }
+
+    // Interlock 설정 전송
+    private suspend fun sendInterlockSettings() {
+        Timber.d("Interlock 설정 전송 중...")
+
+        // T_DR_RESPONSE_TIME 설정 패킷
+        val drResponseTimePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.TDrResponseTime,
+            data = SerialPacketHandler.createUShortData(100),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(drResponseTimePacket)
+        delay(50)
+
+        // INTERLOCK_CONFIG 설정 패킷
+        val interlockConfigPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.InterlockConfig,
+            data = SerialPacketHandler.createUCharData(0),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(interlockConfigPacket)
+        delay(50)
+
+        // DOORLOCK_CONFIG 설정 패킷
+        val doorlockConfigPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.DoorlockConfig,
+            data = SerialPacketHandler.createUCharData(0),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(doorlockConfigPacket)
+        delay(50)
+
+        // EXTLOCK_CONFIG 설정 패킷
+        val extlockConfigPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.ExtlockConfig,
+            data = SerialPacketHandler.createUCharData(0),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(extlockConfigPacket)
+        delay(50)
+    }
+
+    // Filament 설정 전송
+    private suspend fun sendFilamentSettings() {
+        Timber.d("Filament 설정 전송 중...")
+
+        // FILAMENT_MIN 설정 패킷
+        val filamentMinPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.FilamentMin,
+            data = SerialPacketHandler.createUShortData(50),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(filamentMinPacket)
+        delay(50)
+
+        // FILAMENT_MAX 설정 패킷
+        val filamentMaxPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.FilamentMax,
+            data = SerialPacketHandler.createUShortData(610),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(filamentMaxPacket)
+        delay(50)
+
+        // OVER_MA_REF 설정 패킷
+        val overMaRefData = ByteArray(4)
+        val overMaValue = SerialPacketHandler.createUShortData(1000)
+        val overMaDacValue = SerialPacketHandler.createUShortData(3500)
+        System.arraycopy(overMaValue, 0, overMaRefData, 0, 2)
+        System.arraycopy(overMaDacValue, 0, overMaRefData, 2, 2)
+
+        val overMaRefPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.OverMaRef,
+            data = overMaRefData,
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(overMaRefPacket)
+        delay(50)
+
+        // OVER_KV_REF 설정 패킷
+        val overKvRefData = ByteArray(3)
+        val overKvValue = SerialPacketHandler.createUCharData(155)
+        val overKvDacValue = SerialPacketHandler.createUShortData(3300)
+        System.arraycopy(overKvValue, 0, overKvRefData, 0, 1)
+        System.arraycopy(overKvDacValue, 0, overKvRefData, 1, 2)
+
+        val overKvRefPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.OverKvRef,
+            data = overKvRefData,
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(overKvRefPacket)
+        delay(50)
+    }
+
+    // AEC 설정 전송
+    private suspend fun sendAECSettings() {
+        Timber.d("AEC 설정 전송 중...")
+
+        // AEC_BACKUP_TIME 설정 패킷
+        val aecBackupTimePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.AecBackupTime,
+            data = SerialPacketHandler.createUShortData(500),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(aecBackupTimePacket)
+        delay(50)
+
+        // FOOT_SWITCH_DELAY_TIME 설정 패킷
+        val footSwitchDelayTimePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.FootSwitchDelayTime,
+            data = SerialPacketHandler.createUShortData(5000),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(footSwitchDelayTimePacket)
+        delay(50)
+
+        // AEC_ERROR_TIME 설정 패킷
+        val aecErrorTimePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.AecErrorTime,
+            data = SerialPacketHandler.createUShortData(10),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(aecErrorTimePacket)
+        delay(50)
+    }
+
+    // Focus 관련 설정 전송
+    private suspend fun sendFocusSettings() {
+        Timber.d("Focus 설정 전송 중...")
+
+        // TUBE_FOCUS_SMALL_CURRENT_STANDBY 설정 패킷
+        val tubeFocusSmallCurrentStandbyPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.TubeFocusSmallCurrentStandby,
+            data = SerialPacketHandler.createUShortData(1340), // 2.0A
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(tubeFocusSmallCurrentStandbyPacket)
+        delay(50)
+
+        // TUBE_FOCUS_LARGE_CURRENT_STANDBY 설정 패킷
+        val tubeFocusLargeCurrentStandbyPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.TubeFocusLargeCurrentStandby,
+            data = SerialPacketHandler.createUShortData(1340), // 2.0A
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(tubeFocusLargeCurrentStandbyPacket)
+        delay(50)
+
+        // FILAMENT_BOOST_TIME 설정 패킷
+        val filamentBoostTimePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.FilamentBoostTime,
+            data = SerialPacketHandler.createUShortData(300),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(filamentBoostTimePacket)
+        delay(50)
+
+        // FOCUS_CHANGE_TIME 설정 패킷
+        val focusChangeTimePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.FocusChangeTime,
+            data = SerialPacketHandler.createUShortData(1000),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(focusChangeTimePacket)
+        delay(50)
+
+        // FOCUS_CHANGE_ADD_PREPARE_TIME 설정 패킷
+        val focusChangePrepareTimePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.FocusChangeAddPrepareTime,
+            data = SerialPacketHandler.createUShortData(2000),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(focusChangePrepareTimePacket)
+        delay(50)
+
+        // FILAMENT_PREPARE_TIME 설정 패킷
+        val filamentPrepareTimePacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.FilamentPrepareTime,
+            data = SerialPacketHandler.createUShortData(1500),
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(filamentPrepareTimePacket)
+        delay(50)
+
+        // FOCUS 설정 패킷
+        val focusPacket = SerialPacket(
+            controlCommand = SerialCommand.Control.CommControl,
+            actionCommand = SerialCommand.Action.Focus,
+            data = SerialPacketHandler.createUCharData(0), // 0: Large
+            targetId = SerialPacket.TARGET_MAIN,
+            sourceId = SerialPacket.SOURCE_CONSOLE
+        )
+        sendPacket(focusPacket)
+        delay(50)
+    }
+
+
 }

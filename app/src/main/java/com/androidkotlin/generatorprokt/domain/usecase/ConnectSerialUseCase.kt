@@ -28,8 +28,18 @@ class ConnectSerialUseCase @Inject constructor(
 
             // 연결 결과 로깅
             result.fold(
-                onSuccess = { Timber.d("ConnectSerialUseCase: 연결 성공") },
-                onFailure = { e -> Timber.e(e, "ConnectSerialUseCase: 연결 실패") }
+                onSuccess = {
+                    Timber.d("ConnectSerialUseCase: 연결 성공")
+
+                    // 연결 성공 후 하트비트 전송
+                    serial422Repository.sendHeartbeat()
+
+                    // 시스템 상태 요청
+                    serial422Repository.sendSystemStatus(3) // 대기 모드(STANDBY)
+                },
+                onFailure = { e ->
+                    Timber.e(e, "ConnectSerialUseCase: 연결 실패")
+                }
             )
 
             result
