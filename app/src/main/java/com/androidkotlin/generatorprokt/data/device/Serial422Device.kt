@@ -5,6 +5,7 @@ import android.util.Log
 import android_serialport_api.SerialPort
 import android_serialport_api.SerialPortFinder
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
@@ -133,20 +134,71 @@ class Serial422Device @Inject constructor(
     /**
      * 데이터 송신
      */
+//    suspend fun sendData(data: ByteArray): Result<Unit> = withContext(ioDispatcher) {
+//        try {
+//            if (!isConnected || mOutputStream == null) {
+//                return@withContext Result.failure(Exception("Serial port not connected"))
+//            }
+//
+//            mOutputStream?.write(data)
+//            mOutputStream?.flush()
+//            Timber.d("데이터 전송 완료: ${bytesToHexString(data)}")
+//
+//            return@withContext Result.success(Unit)
+//        } catch (e: Exception) {
+//            Timber.e(e, "데이터 전송 중 오류 발생")
+//            return@withContext Result.failure(e)
+//        }
+//    }
+
     suspend fun sendData(data: ByteArray): Result<Unit> = withContext(ioDispatcher) {
         try {
-            if (!isConnected || mOutputStream == null) {
-                return@withContext Result.failure(Exception("Serial port not connected"))
+            // 데이터 유효성 검사
+            if (data.isEmpty()) {
+                Timber.e("전송할 데이터가 없습니다")
+                return@withContext Result.failure(IllegalArgumentException("데이터가 비어있습니다"))
             }
 
-            mOutputStream?.write(data)
-            mOutputStream?.flush()
-            Timber.d("데이터 전송 완료: ${bytesToHexString(data)}")
+            // 연결 상태 확인
+            if (!isConnected) {
+                Timber.e("시리얼 포트가 연결되어 있지 않습니다")
+                return@withContext Result.failure(IOException("시리얼 포트 연결 안됨"))
+            }
 
-            return@withContext Result.success(Unit)
+            // 로깅: 전송 데이터 16진수 표현
+            val hexData = data.joinToString(" ") { String.format("%02X", it) }
+            Timber.d("데이터 전송 준비: $hexData")
+
+            // 데이터 쓰기 전 버퍼 비우기
+            mOutputStream?.let { outputStream ->
+                try {
+                    // available() 메서드 대신 다른 방식으로 버퍼 클리어
+                    outputStream.flush()
+                } catch (e: Exception) {
+                    Timber.w("버퍼 클리어 중 예외 발생: ${e.message}")
+                }
+
+                // 데이터 쓰기
+                try {
+                    outputStream.write(data)
+                    outputStream.flush()
+                    Timber.d("데이터 전송 완료: ${data.size}바이트")
+                } catch (e: IOException) {
+                    Timber.e(e, "데이터 쓰기 중 오류 발생")
+                    return@withContext Result.failure(e)
+                }
+            } ?: run {
+                Timber.e("출력 스트림이 초기화되지 않았습니다")
+                return@withContext Result.failure(IllegalStateException("출력 스트림 없음"))
+            }
+
+            // 전송 후 짧은 대기 (선택적)
+            delay(10)
+
+            Result.success(Unit)
         } catch (e: Exception) {
-            Timber.e(e, "데이터 전송 중 오류 발생")
-            return@withContext Result.failure(e)
+            Timber.e(e, "데이터 전송 중 예외 발생")
+            Result.failure(e)
         }
     }
 

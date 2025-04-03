@@ -2,6 +2,9 @@ package com.androidkotlin.generatorprokt.data.device
 
 import com.androidkotlin.generatorprokt.domain.model.SerialCommand
 import com.androidkotlin.generatorprokt.domain.model.SerialPacket
+import com.androidkotlin.generatorprokt.domain.model.SerialPacket.Companion.PROTOCOL_END
+import com.androidkotlin.generatorprokt.domain.model.SerialPacket.Companion.PROTOCOL_FIRST
+import com.androidkotlin.generatorprokt.domain.model.SerialPacket.Companion.PROTOCOL_SECOND
 import com.androidkotlin.generatorprokt.domain.model.SerialResponse
 import timber.log.Timber
 
@@ -18,34 +21,97 @@ class SerialPacketHandler {
          * SerialPacket 객체를 실제 바이트 배열로 변환
          * 통신 프로토콜에 맞게 헤더, 명령어, 데이터, 체크섬, 종료 바이트 등을 포함한 패킷을 구성한다.
          */
-        fun serializePacket(packet: SerialPacket): ByteArray {
-            // 패킷 구조 만들기
-            // 1. 프로토콜 헤더 설정 (0x23, 0x50)
-            // 2. 타겟 ID, 소스 ID 설정
-            // 3. 패킷 길이 설정
-            // 4. 명령어 설정 (Control, Action)
-            // 5. 데이터 복사
-            // 6. 체크섬 계산 및 설정
-            // 7. 종료 바이트 설정 (0x21)
+//        fun serializePacket(packet: SerialPacket): ByteArray {
+//            // 패킷 구조 만들기
+//            // 1. 프로토콜 헤더 설정 (0x23, 0x50)
+//            // 2. 타겟 ID, 소스 ID 설정
+//            // 3. 패킷 길이 설정
+//            // 4. 명령어 설정 (Control, Action)
+//            // 5. 데이터 복사
+//            // 6. 체크섬 계산 및 설정
+//            // 7. 종료 바이트 설정 (0x21)
+//
+//            Timber.d("패킷 직렬화 시작: Control=${packet.controlCommand.value}, Action=${packet.actionCommand.value}")
+//            val dataLength = packet.data?.size ?: 0
+//            val totalLength = 10 + dataLength // 헤더(8) + 데이터 + 체크섬(1) + 종료(1)
+//
+//            val result = ByteArray(totalLength)
+//
+//            // 프로토콜 헤더 설정
+//            result[0] = SerialPacket.PROTOCOL_FIRST  // 0x23
+//            result[1] = SerialPacket.PROTOCOL_SECOND // 0x50
+//            result[2] = packet.targetId
+//            result[3] = packet.sourceId
+//
+//            // 패킷 길이 설정 (2바이트)
+//            val packetLength = 8 + dataLength
+//            result[4] = ((packetLength shr 8) and 0xFF).toByte()
+//            result[5] = (packetLength and 0xFF).toByte()
+//
+//            // 명령어 설정
+//            result[6] = packet.controlCommand.value.toByte()
+//            result[7] = packet.actionCommand.value.toByte()
+//
+//            // 데이터 복사
+//            packet.data?.forEachIndexed { index, byte ->
+//                result[8 + index] = byte
+//            }
+//
+//            // 체크섬 계산 및 설정
+//            var checksum: Byte = 0
+//            for (i in 0 until 8 + dataLength) {
+//                checksum = (checksum + result[i]).toByte()
+//            }
+//            result[8 + dataLength] = checksum
+//
+//            // 종료 바이트 설정
+//            result[9 + dataLength] = SerialPacket.PROTOCOL_END  // 0x21
+//
+//            Timber.d("패킷 직렬화 완료: ${bytesToHexString(result)}")
+//            return result
+//        }
 
+        fun serializePacket(packet: SerialPacket): ByteArray {
             Timber.d("패킷 직렬화 시작: Control=${packet.controlCommand.value}, Action=${packet.actionCommand.value}")
+
+            // 데이터 길이 계산 (데이터가 없는 경우 0)
             val dataLength = packet.data?.size ?: 0
-            val totalLength = 10 + dataLength // 헤더(8) + 데이터 + 체크섬(1) + 종료(1)
+
+            // 전체 패킷 길이 계산:
+            // 프로토콜 헤더(2) + 타겟ID(1) + 소스ID(1) + 패킷길이(2) + 컨트롤커맨드(1) + 액션커맨드(1)
+            // + 데이터 + 체크섬(1) + 종료 바이트(1)
+
+
+            /*
+            1. 데이터가 없는 경우 (예: 초기화 요청)
+            패킷 길이: 10바이트
+            구조: 프로토콜 헤더(2) + 타겟ID(1) + 소스ID(1) + 길이(2) + 컨트롤 커맨드(1) + 액션 커맨드(1) + 체크섬(1) + 종료 바이트(1)
+
+
+            2.데이터가 있는 경우
+            패킷 길이: 11바이트 이상
+            추가로 데이터 바이트 포함 */
+
+            // 고정 길이 부분: 10바이트 (데이터 없을 때)
+            val totalLength = 10 + dataLength
 
             val result = ByteArray(totalLength)
 
-            // 프로토콜 헤더 설정
-            result[0] = SerialPacket.PROTOCOL_FIRST  // 0x23
-            result[1] = SerialPacket.PROTOCOL_SECOND // 0x50
+            // 프로토콜 헤더 설정 (0x23, 0x50)
+            result[0] = PROTOCOL_FIRST   // 0x23
+            result[1] = PROTOCOL_SECOND  // 0x50
+
+            // 타겟 및 소스 ID 설정
             result[2] = packet.targetId
             result[3] = packet.sourceId
 
             // 패킷 길이 설정 (2바이트)
+            // 패킷 길이 = 8 (고정 헤더) + 데이터 길이
             val packetLength = 8 + dataLength
             result[4] = ((packetLength shr 8) and 0xFF).toByte()
             result[5] = (packetLength and 0xFF).toByte()
 
-            // 명령어 설정
+            // 컨트롤 커맨드와 액션 커맨드 설정
             result[6] = packet.controlCommand.value.toByte()
             result[7] = packet.actionCommand.value.toByte()
 
@@ -54,7 +120,7 @@ class SerialPacketHandler {
                 result[8 + index] = byte
             }
 
-            // 체크섬 계산 및 설정
+            // 체크섬 계산
             var checksum: Byte = 0
             for (i in 0 until 8 + dataLength) {
                 checksum = (checksum + result[i]).toByte()
@@ -62,10 +128,21 @@ class SerialPacketHandler {
             result[8 + dataLength] = checksum
 
             // 종료 바이트 설정
-            result[9 + dataLength] = SerialPacket.PROTOCOL_END  // 0x21
+            result[9 + dataLength] = PROTOCOL_END  // 0x21
 
+            // 디버깅을 위한 패킷 로깅
             Timber.d("패킷 직렬화 완료: ${bytesToHexString(result)}")
+
             return result
+        }
+
+        // 체크섬을 위한 헬퍼 함수 추가
+        private fun calculateChecksum(data: ByteArray): Byte {
+            var checksum: Byte = 0
+            for (byte in data) {
+                checksum = (checksum + byte).toByte()
+            }
+            return checksum
         }
 
         /**
@@ -126,68 +203,6 @@ class SerialPacketHandler {
                 return SerialResponse.Error(e)
             }
         }
-//        fun parseResponse(buffer: ByteArray, size: Int): SerialResponse {
-//            // 1. 패킷 형식 검증
-//            // 2. 패킷 길이 계산
-//            // 3. 체크섬 검증
-//            // 4. 명령어 추출
-//            // 5. 데이터 추출
-//            // 6. SerialResponse 객체 생성하여 반환
-//
-//            Timber.d("응답 파싱 시작: ${size}바이트, 데이터: ${bytesToHexString(buffer.copyOf(size))}")
-//
-//            // 패킷 유효성 검사
-//            if (size < 10 || buffer[0] != SerialPacket.PROTOCOL_FIRST || buffer[1] != SerialPacket.PROTOCOL_SECOND) {
-//                Timber.e("잘못된 패킷 형식: 프로토콜 헤더 불일치 또는 패킷 크기 부족")
-//                return SerialResponse.Error(Exception("Invalid packet format"))
-//            }
-//
-//            // 패킷 길이 계산
-//            val packetLength = (((buffer[4].toInt() and 0xFF) shl 8) or (buffer[5].toInt() and 0xFF))
-//            val dataLength = packetLength - 9  // 8 대신 9를 사용
-//            Timber.d("패킷 길이: $packetLength, 데이터 길이: $dataLength")
-//
-//            if (dataLength < 0 || dataLength + 10 > size +1) { // size에 1을 더해줌
-//                Timber.e("패킷 데이터 길이가 잘못되었습니다: $dataLength")
-//                return SerialResponse.Error(Exception("Invalid data length"))
-//            }
-//
-//            // 체크섬 검증
-//            var calculatedChecksum: Byte = 0
-//            for (i in 0 until 8 + dataLength) {
-//                calculatedChecksum = (calculatedChecksum + buffer[i]).toByte()
-//            }
-//
-//            if (calculatedChecksum != buffer[8 + dataLength]) {
-//                Timber.e("체크섬 불일치: 계산=${calculatedChecksum.toInt() and 0xFF}, 수신=${buffer[8 + dataLength].toInt() and 0xFF}")
-//                return SerialResponse.Error(Exception("Checksum mismatch"))
-//            }
-//
-//            // 컨트롤 및 액션 명령어 추출
-//            val controlCommand = buffer[6].toInt() and 0xFF
-//            val actionCommand = buffer[7].toInt() and 0xFF
-//            Timber.d("응답 명령어: Control=0x${controlCommand.toString(16)}, Action=0x${actionCommand.toString(16)}")
-//
-//            // 데이터 추출
-//            val data = if (dataLength > 0) {
-//                ByteArray(dataLength).apply {
-//                    System.arraycopy(buffer, 8, this, 0, dataLength)
-//                }
-//            } else null
-//
-//            if (data != null) {
-//                Timber.d("응답 데이터: ${bytesToHexString(data)}")
-//            } else {
-//                Timber.d("응답 데이터 없음")
-//            }
-//
-//            return SerialResponse.Success(
-//                controlCommand = controlCommand,
-//                actionCommand = actionCommand,
-//                data = data
-//            )
-//        }
-
 
         /**
          * 응답 파싱 후 의미 있는 데이터로 해석
@@ -236,6 +251,19 @@ class SerialPacketHandler {
                 SerialCommand.Action.HeartBeat.value -> {
                     Timber.d("하트비트 응답 수신됨")
                     return "HeartBeat OK"
+                }
+
+                SerialCommand.Action.CapbankChargeTime.value -> {
+                    if (response.data != null && response.data.size >= 2) {
+                        val value = ((response.data[0].toInt() and 0xFF) shl 8) or (response.data[1].toInt() and 0xFF)
+                        Timber.d("Action_Command_Process() T_CAPBANK_CHARGE_TIME = $value")
+                    }
+                }
+                SerialCommand.Action.CapbankChargeTimeout.value -> {
+                    if (response.data != null && response.data.size >= 2) {
+                        val value = ((response.data[0].toInt() and 0xFF) shl 8) or (response.data[1].toInt() and 0xFF)
+                        Timber.d("Action_Command_Process() T_CAPBANK_CHARGE_TIMEOUT = $value")
+                    }
                 }
 
                 // KV 피드백 값

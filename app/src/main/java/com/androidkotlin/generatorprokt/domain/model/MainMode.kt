@@ -1,5 +1,8 @@
 package com.androidkotlin.generatorprokt.domain.model
 
+import com.androidkotlin.generatorprokt.data.device.SerialPacketHandler.Companion.bytesToHexString
+import timber.log.Timber
+
 /**
  * 발전기 메인 모드 상태를 정의하는 Enum 클래스
  * 각 모드는 고유한 헥사값과 설명을 가짐
@@ -27,6 +30,7 @@ enum class MainMode(val hexValue: Int, val korDescription: String) {
          * 헥사값으로 모드 찾기
          */
         fun fromHexValue(hexValue: Int): MainMode {
+            Timber.d("Raw Mode Value 분석: 0x${hexValue.toString(16)}")
             return values().find { it.hexValue == hexValue } ?: NONE
         }
 

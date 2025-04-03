@@ -100,48 +100,71 @@ class Serial422RepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun sendPacket(packet: SerialPacket): Result<SerialResponse> = withContext(ioDispatcher) {
-        Timber.d("sendPacket() 호출됨 - Control: ${packet.controlCommand.javaClass.simpleName}, Action: ${packet.actionCommand.javaClass.simpleName}")
+//    override suspend fun sendPacket(packet: SerialPacket): Result<SerialResponse> = withContext(ioDispatcher) {
+//        Timber.d("sendPacket() 호출됨 - Control: ${packet.controlCommand.javaClass.simpleName}, Action: ${packet.actionCommand.javaClass.simpleName}")
+//
+//        try {
+//            if (!isConnected()) {
+//                Timber.e("장치가 연결되어 있지 않아 패킷을 보낼 수 없습니다")
+//                return@withContext Result.failure(Exception("장치가 연결되어 있지 않습니다"))
+//            }
+//
+//            // 패킷 직렬화 직전 로그
+//            Timber.d("woghl1129: 패킷 직렬화 시작 - Control: ${packet.controlCommand.value}, Action: ${packet.actionCommand.value}")
+//
+//            val serializedPacket = SerialPacketHandler.serializePacket(packet)
+//            //Timber.d("패킷 직렬화 완료: ${SerialPacketHandler.bytesToHexString(serializedPacket)}")
+//            Timber.d("woghl1129: 패킷 직렬화 완료 - ${SerialPacketHandler.bytesToHexString(serializedPacket)}")
+//            Timber.d("woghl1129: 패킷 전송 시작")
+//
+//            val result = serial422Device.sendData(serializedPacket)
+//
+//            // 패킷 전송 직후 로그
+//            Timber.d("woghl1129: 패킷 전송 완료 - 결과: ${result.isSuccess}")
+//
+//            if (result.isSuccess) {
+//                Timber.d("패킷 전송 성공")
+//                Timber.d("woghl1129: 패킷 전송 성공 - 응답 대기 중")
+//
+//                // TODO: 실제 구현에서는 응답을 기다려야 함
+//                // 여기서는 단순화를 위해 성공 응답을 바로 반환
+//                Result.success(SerialResponse.Success(
+//                    controlCommand = packet.controlCommand.value,
+//                    actionCommand = packet.actionCommand.value,
+//                    data = null
+//                ))
+//            } else {
+//                val exception = result.exceptionOrNull() ?: Exception("알 수 없는 오류")
+//                Timber.e(exception, "패킷 전송 실패")
+//                Timber.e("woghl1129: 패킷 전송 실패 - ${exception.message}")
+//                Result.failure(exception)
+//            }
+//
+//        } catch (e: Exception) {
+//            Timber.e(e, "패킷 전송 중 예외 발생")
+//            Timber.e("woghl1129: 패킷 전송 중 예외 - ${e.message}")
+//            Result.failure(e)
+//        }
+//    }
 
+    override suspend fun sendPacket(packet: SerialPacket): Result<SerialResponse> = withContext(ioDispatcher) {
         try {
             if (!isConnected()) {
-                Timber.e("장치가 연결되어 있지 않아 패킷을 보낼 수 없습니다")
                 return@withContext Result.failure(Exception("장치가 연결되어 있지 않습니다"))
             }
 
-            // 패킷 직렬화 직전 로그
-            Timber.d("woghl1129: 패킷 직렬화 시작 - Control: ${packet.controlCommand.value}, Action: ${packet.actionCommand.value}")
-
             val serializedPacket = SerialPacketHandler.serializePacket(packet)
-            //Timber.d("패킷 직렬화 완료: ${SerialPacketHandler.bytesToHexString(serializedPacket)}")
-            Timber.d("woghl1129: 패킷 직렬화 완료 - ${SerialPacketHandler.bytesToHexString(serializedPacket)}")
-            Timber.d("woghl1129: 패킷 전송 시작")
+            Timber.d("패킷 전송: ${SerialPacketHandler.bytesToHexString(serializedPacket)}")
 
-            val result = serial422Device.sendData(serializedPacket)
-
-            // 패킷 전송 직후 로그
-            Timber.d("woghl1129: 패킷 전송 완료 - 결과: ${result.isSuccess}")
-
-            if (result.isSuccess) {
-                Timber.d("패킷 전송 성공")
-                Timber.d("woghl1129: 패킷 전송 성공 - 응답 대기 중")
-
-                // TODO: 실제 구현에서는 응답을 기다려야 함
-                // 여기서는 단순화를 위해 성공 응답을 바로 반환
-                Result.success(SerialResponse.Success(
+            serial422Device.sendData(serializedPacket).map {
+                SerialResponse.Success(
                     controlCommand = packet.controlCommand.value,
                     actionCommand = packet.actionCommand.value,
                     data = null
-                ))
-            } else {
-                val exception = result.exceptionOrNull() ?: Exception("알 수 없는 오류")
-                Timber.e(exception, "패킷 전송 실패")
-                Timber.e("woghl1129: 패킷 전송 실패 - ${exception.message}")
-                Result.failure(exception)
+                )
             }
         } catch (e: Exception) {
-            Timber.e(e, "패킷 전송 중 예외 발생")
-            Timber.e("woghl1129: 패킷 전송 중 예외 - ${e.message}")
+            Timber.e(e, "패킷 전송 중 오류")
             Result.failure(e)
         }
     }
