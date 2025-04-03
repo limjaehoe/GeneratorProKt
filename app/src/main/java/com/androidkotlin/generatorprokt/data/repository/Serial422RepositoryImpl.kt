@@ -275,7 +275,7 @@ class Serial422RepositoryImpl @Inject constructor(
             // DAC 값은 기기 의존적이므로 임시로 0 설정
             val dacData = SerialPacketHandler.createUShortData(0)
 
-            // 최종 데이터 구성 (4바이트: mA값 2바이트 + DAC값 2바이트)
+            // 최종 데이터 구성 (4바이트: mA값 ㅗ바이트 + DAC값 2바이트)
             val data = ByteArray(4)
             System.arraycopy(maData, 0, data, 0, 2)
             System.arraycopy(dacData, 0, data, 2, 2)

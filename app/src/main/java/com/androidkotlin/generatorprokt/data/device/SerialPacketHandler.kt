@@ -106,8 +106,8 @@ class SerialPacketHandler {
             result[3] = packet.sourceId
 
             // 패킷 길이 설정 (2바이트)
-            // 패킷 길이 = 8 (고정 헤더) + 데이터 길이
-            val packetLength = 8 + dataLength
+            // 패킷 길이 = 8 -> 9변경 (고정 헤더) + 데이터 길이
+            val packetLength = 9 + dataLength
             result[4] = ((packetLength shr 8) and 0xFF).toByte()
             result[5] = (packetLength and 0xFF).toByte()
 
